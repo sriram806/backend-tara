@@ -1,0 +1,91 @@
+version: "3.9"
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: services/gateway/Dockerfile
+    container_name: thinkai-gateway
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: gateway
+      PORT: 4000
+      HOST: 0.0.0.0
+      LOG_LEVEL: info
+    ports:
+      - "4000:4000"
+    networks:
+      - thinkai-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  auth-service:
+    build:
+      context: ..
+      dockerfile: services/auth-service/Dockerfile
+    container_name: thinkai-auth-service
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: auth-service
+      PORT: 4001
+      HOST: 0.0.0.0
+      LOG_LEVEL: info
+    ports:
+      - "4001:4001"
+    networks:
+      - thinkai-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  user-service:
+    build:
+      context: ..
+      dockerfile: services/user-service/Dockerfile
+    container_name: thinkai-user-service
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: user-service
+      PORT: 4002
+      HOST: 0.0.0.0
+      LOG_LEVEL: info
+    ports:
+      - "4002:4002"
+    networks:
+      - thinkai-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ai-service:
+    build:
+      context: ..
+      dockerfile: services/ai-service/Dockerfile
+    container_name: thinkai-ai-service
+    environment:
+      SERVICE_NAME: ai-service
+      ENVIRONMENT: development
+    ports:
+      - "8000:8000"
+    networks:
+      - thinkai-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  thinkai-network:
+    driver: bridge

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.pnpm-store/
+.env
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+.vscode/
