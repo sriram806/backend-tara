@@ -96,6 +96,7 @@ services:
       PORT: ${USER_SERVICE_PORT:-4002}
       HOST: 0.0.0.0
       LOG_LEVEL: info
+      DATABASE_URL: ${DATABASE_URL:-postgresql://thinkai:thinkai@postgres:5432/thinkai?sslmode=disable}
       MONGO_URL: ${MONGO_URL}
       AI_SERVICE_INTERNAL_URL: ${AI_SERVICE_INTERNAL_URL:-http://ai-service:8000}
       AI_MONTHLY_QUOTA_MAX: ${AI_MONTHLY_QUOTA_MAX:-30}

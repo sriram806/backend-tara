@@ -119,6 +119,9 @@ importers:
 
   services/user-service:
     dependencies:
+      '@fastify/cors':
+        specifier: ^10.0.1
+        version: 10.1.0
       '@thinkai/config':
         specifier: workspace:*
         version: link:../../packages/config

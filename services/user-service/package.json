@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fastify/cors": "^10.0.1",
     "@thinkai/db": "workspace:*",
     "@thinkai/config": "workspace:*",
     "@thinkai/types": "workspace:*",

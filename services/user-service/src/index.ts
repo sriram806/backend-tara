@@ -1,5 +1,7 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import crypto from 'node:crypto';
+import { z } from 'zod';
 import { commonServiceEnvSchema, loadEnv } from '@thinkai/config';
 import { UserController } from './controllers/user.controller';
 import { registerCorePlugins } from './plugins/core.plugin';
@@ -7,7 +9,11 @@ import { healthRoutes } from './routes/health.routes';
 import { userRoutes } from './routes/user.routes';
 import { UserService } from './services/user.service';
 
-const env = loadEnv(commonServiceEnvSchema);
+const env = loadEnv(commonServiceEnvSchema.merge(z.object({
+  CORS_ORIGIN: z.string().default('http://localhost:3000')
+})));
+
+const allowedOrigins = env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
 
 const userController = new UserController(new UserService());
 
@@ -15,6 +21,18 @@ const app = Fastify({
   logger: { level: env.LOG_LEVEL },
   requestIdHeader: 'x-request-id',
   genReqId: () => crypto.randomUUID()
+});
+
+void app.register(cors, {
+  credentials: true,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`Origin ${origin} not allowed by CORS`), false);
+  }
 });
 
 app.addHook('onResponse', async (request, reply) => {
