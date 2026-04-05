@@ -8,5 +8,5 @@ router = APIRouter()
 def health() -> dict[str, str]:
     return {
         "status": "ok",
-        "service": settings.service_name
+        "service": getattr(settings, "SERVICE_NAME", "ai-service")
     }

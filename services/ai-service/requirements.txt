@@ -1,3 +1,14 @@
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 pydantic-settings==2.7.0
+redis>=5.0.0
+motor>=3.3.2
+bullmq>=1.39.0
+openai>=1.52.2
+anthropic>=0.39.0
+tenacity>=9.0.0
+google-generativeai>=0.8.0
+spacy>=3.7.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+sentence-transformers>=3.0.1

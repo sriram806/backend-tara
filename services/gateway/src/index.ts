@@ -41,6 +41,9 @@ app.register(proxyRoutes(gatewayController));
 
 const start = async () => {
   try {
+    const { setupWebSockets } = await import('./services/socket.service');
+    setupWebSockets(app.server);
+
     await app.listen({
       host: env.HOST,
       port: env.PORT
