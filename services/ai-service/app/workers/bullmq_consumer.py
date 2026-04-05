@@ -58,5 +58,5 @@ async def process_analysis(job, job_token):
 
 def start_worker():
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-    worker = Worker("analysis:queue", process_analysis, {"connection": redis_url})
+    worker = Worker("analysis-queue", process_analysis, {"connection": redis_url})
     return worker

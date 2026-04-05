@@ -64,7 +64,7 @@ services:
       AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://localhost:4001}
       USER_SERVICE_URL: ${USER_SERVICE_URL:-http://localhost:4002}
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://localhost:8000}
-      REDIS_URL: ${REDIS_URL}
+      REDIS_URL: redis://redis:6379
     ports:
       - "4000:4000"
     networks:
@@ -102,6 +102,7 @@ services:
       SMTP_USER: ${SMTP_EMAIL}
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM_EMAIL: ${SMTP_EMAIL}
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
     ports:
       - "4001:4001"
     depends_on:
@@ -128,9 +129,10 @@ services:
       HOST: 0.0.0.0
       LOG_LEVEL: info
       DATABASE_URL: ${DATABASE_URL:-postgresql://thinkai:thinkai@postgres:5432/thinkai?sslmode=disable}
-      MONGO_URL: ${MONGO_URL}
+      MONGO_URL: mongodb://admin:secret@mongodb:27017/thinkai?authSource=admin
       AI_SERVICE_INTERNAL_URL: ${AI_SERVICE_INTERNAL_URL:-http://ai-service:8000}
       AI_MONTHLY_QUOTA_MAX: ${AI_MONTHLY_QUOTA_MAX:-30}
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
     ports:
       - "4002:4002"
     networks:

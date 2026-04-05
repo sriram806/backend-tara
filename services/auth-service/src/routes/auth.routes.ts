@@ -7,6 +7,7 @@ export const authRoutes = (controller: AuthController): FastifyPluginAsync => {
     app.post('/register', { preHandler: otpRateLimit }, (request, reply) => controller.register(request, reply));
     app.post('/login', { preHandler: loginRateLimit }, (request, reply) => controller.login(request, reply));
     app.post('/refresh', (request, reply) => controller.refresh(request, reply));
+    app.post('/refresh-token', (request, reply) => controller.refresh(request, reply));
     app.delete('/logout', (request, reply) => controller.logout(request, reply));
 
     app.post('/send-verify-otp', { preHandler: otpRateLimit }, (request, reply) => controller.sendVerifyOtp(request, reply));

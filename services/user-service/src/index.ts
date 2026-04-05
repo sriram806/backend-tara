@@ -12,7 +12,7 @@ import { UserService } from './services/user.service';
 import mongoose from 'mongoose';
 
 const env = loadEnv(commonServiceEnvSchema.merge(z.object({
-  CORS_ORIGIN: z.string().default('http://localhost:3000')
+  CORS_ORIGIN: z.string().default('http://localhost:3000,http://localhost:3001')
 })));
 
 const allowedOrigins = env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
