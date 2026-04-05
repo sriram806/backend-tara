@@ -8,7 +8,6 @@ import {
   RegisterInput,
   ResetPasswordInput,
   SendVerifyOtpInput,
-  VerifyResetOtpInput,
   VerifyEmailInput
 } from '../schemas/auth.schema';
 import { AuthStore } from './auth.store';
@@ -156,19 +155,6 @@ export class AuthService {
         };
   }
 
-  async verifyResetOtp(input: VerifyResetOtpInput) {
-    const user = await this.store.findUserByEmail(input.email);
-    if (!user) {
-      throw new AppError('USER_NOT_FOUND', 'No account found with the provided ID', 404);
-    }
-
-    await this.validateOtpOrThrow(user.email, 'RESET_PASSWORD', input.otp, false);
-
-    return {
-      verified: true
-    };
-  }
-
   async resetPassword(input: ResetPasswordInput) {
     const user = await this.store.findUserByEmail(input.email);
     if (!user) {
@@ -234,12 +220,7 @@ export class AuthService {
     return otp;
   }
 
-  private async validateOtpOrThrow(
-    email: string,
-    type: 'VERIFY_EMAIL' | 'RESET_PASSWORD',
-    otp: string,
-    consumeOnSuccess = true
-  ) {
+  private async validateOtpOrThrow(email: string, type: 'VERIFY_EMAIL' | 'RESET_PASSWORD', otp: string) {
     const record = await this.store.getLatestOtp(email, type);
     if (!record) {
       throw new AppError('INVALID_OTP', 'Invalid OTP', 400);
@@ -261,8 +242,6 @@ export class AuthService {
       throw new AppError('INVALID_OTP', 'Invalid OTP', 400);
     }
 
-    if (consumeOnSuccess) {
-      await this.store.deleteOtp(record.id);
-    }
+    await this.store.deleteOtp(record.id);
   }
 }
