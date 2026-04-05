@@ -1,15 +1,39 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: thinkai-postgres
+    environment:
+      POSTGRES_USER: thinkai
+      POSTGRES_PASSWORD: thinkai
+      POSTGRES_DB: thinkai
+    ports:
+      - "5432:5432"
+    volumes:
+      - thinkai-pg-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - thinkai-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thinkai -d thinkai"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   gateway:
     build:
       context: ..
       dockerfile: services/gateway/Dockerfile
     container_name: thinkai-gateway
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       SERVICE_NAME: gateway
-      PORT: 4000
+      PORT: ${GATEWAY_PORT:-4000}
       HOST: 0.0.0.0
       LOG_LEVEL: info
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://localhost:4001}
+      USER_SERVICE_URL: ${USER_SERVICE_URL:-http://localhost:4002}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://localhost:8000}
+      REDIS_URL: ${REDIS_URL}
     ports:
       - "4000:4000"
     networks:
@@ -27,13 +51,31 @@ services:
       dockerfile: services/auth-service/Dockerfile
     container_name: thinkai-auth-service
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       SERVICE_NAME: auth-service
-      PORT: 4001
+      PORT: ${AUTH_SERVICE_PORT:-4001}
       HOST: 0.0.0.0
       LOG_LEVEL: info
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_ACCESS_SECRET: ${AUTH_ACCESS_TOKEN_SECRET}
+      JWT_REFRESH_SECRET: ${AUTH_REFRESH_TOKEN_SECRET}
+      ACCESS_TOKEN_TTL: 15m
+      REFRESH_TOKEN_TTL: 30d
+      REFRESH_COOKIE_NAME: refreshToken
+      BCRYPT_ROUNDS: 12
+      OTP_EXPIRY_MINUTES: 5
+      OTP_MAX_ATTEMPTS: 5
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_EMAIL}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM_EMAIL: ${SMTP_EMAIL}
     ports:
       - "4001:4001"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - thinkai-network
     healthcheck:
@@ -49,11 +91,14 @@ services:
       dockerfile: services/user-service/Dockerfile
     container_name: thinkai-user-service
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       SERVICE_NAME: user-service
-      PORT: 4002
+      PORT: ${USER_SERVICE_PORT:-4002}
       HOST: 0.0.0.0
       LOG_LEVEL: info
+      MONGO_URL: ${MONGO_URL}
+      AI_SERVICE_INTERNAL_URL: ${AI_SERVICE_INTERNAL_URL:-http://ai-service:8000}
+      AI_MONTHLY_QUOTA_MAX: ${AI_MONTHLY_QUOTA_MAX:-30}
     ports:
       - "4002:4002"
     networks:
@@ -72,9 +117,29 @@ services:
     container_name: thinkai-ai-service
     environment:
       SERVICE_NAME: ai-service
-      ENVIRONMENT: development
+      ENVIRONMENT: ${NODE_ENV:-development}
+      REDIS_URL: ${REDIS_URL}
+      MONGO_URL: ${MONGO_URL}
+      DATABASE_URL: ${DATABASE_URL}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      CLAUDE_MODEL: ${CLAUDE_MODEL}
+      OPENAI_MODEL: ${OPENAI_MODEL}
+      GROQ_MODEL: ${GROQ_MODEL}
+      GEMINI_MODEL: ${GEMINI_MODEL}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-25}
+      CIRCUIT_FAILURE_THRESHOLD: ${CIRCUIT_FAILURE_THRESHOLD:-5}
+      CIRCUIT_OPEN_SECONDS: ${CIRCUIT_OPEN_SECONDS:-120}
     ports:
       - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - thinkai-network
     healthcheck:
@@ -87,3 +152,6 @@ services:
 networks:
   thinkai-network:
     driver: bridge
+
+volumes:
+  thinkai-pg-data:

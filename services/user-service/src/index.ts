@@ -1,10 +1,15 @@
 import Fastify from 'fastify';
 import crypto from 'node:crypto';
 import { commonServiceEnvSchema, loadEnv } from '@thinkai/config';
-import { healthRoutes } from './routes/health';
-import { meRoutes } from './routes/me';
+import { UserController } from './controllers/user.controller';
+import { registerCorePlugins } from './plugins/core.plugin';
+import { healthRoutes } from './routes/health.routes';
+import { userRoutes } from './routes/user.routes';
+import { UserService } from './services/user.service';
 
 const env = loadEnv(commonServiceEnvSchema);
+
+const userController = new UserController(new UserService());
 
 const app = Fastify({
   logger: { level: env.LOG_LEVEL },
@@ -22,8 +27,10 @@ app.addHook('onResponse', async (request, reply) => {
   });
 });
 
-app.register(healthRoutes);
-app.register(meRoutes, { prefix: '/users' });
+void registerCorePlugins(app);
+
+app.register(healthRoutes(userController));
+app.register(userRoutes(userController), { prefix: '/users' });
 
 const start = async () => {
   try {

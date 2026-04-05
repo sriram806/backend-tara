@@ -1,11 +1,23 @@
 import { FastifyReply } from 'fastify';
-import { ApiEnvelope } from '@thinkai/types';
 
-export function replyOk<T>(reply: FastifyReply, data: T, statusCode = 200) {
-  const payload: ApiEnvelope<T> = {
+export function sendSuccess<T>(reply: FastifyReply, data: T, statusCode = 200) {
+  return reply.code(statusCode).send({
     success: true,
     data
-  };
+  });
+}
 
-  return reply.code(statusCode).send(payload);
+export function sendError(
+  reply: FastifyReply,
+  statusCode: number,
+  code: string,
+  message: string
+) {
+  return reply.code(statusCode).send({
+    success: false,
+    error: {
+      code,
+      message
+    }
+  });
 }
