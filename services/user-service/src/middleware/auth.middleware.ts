@@ -1,4 +1,5 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
+import jwt from 'jsonwebtoken';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -13,24 +14,35 @@ type AccessTokenPayload = {
   userId?: string;
   role?: string;
   type?: string;
+  iat?: number;
+  exp?: number;
 };
 
-function decodeAccessToken(token: string): AccessTokenPayload | null {
-  const parts = token.split('.');
-  if (parts.length < 2) {
-    return null;
-  }
-
+function verifyAccessToken(token: string, secret: string): AccessTokenPayload | null {
   try {
-    const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf-8');
-    return JSON.parse(payloadJson) as AccessTokenPayload;
+    const decoded = jwt.verify(token, secret);
+    if (!decoded || typeof decoded === 'string') {
+      return null;
+    }
+
+    return decoded as AccessTokenPayload;
   } catch {
     return null;
   }
 }
 
 export async function userAuthMiddleware(request: FastifyRequest, reply: FastifyReply) {
+  const accessSecret = process.env.JWT_ACCESS_SECRET;
+  if (!accessSecret) {
+    return reply.code(500).send({
+      success: false,
+      error: {
+        code: 'AUTH_CONFIG_MISSING',
+        message: 'JWT access secret is not configured'
+      }
+    });
+  }
+
   const authorization = request.headers.authorization;
   if (!authorization?.startsWith('Bearer ')) {
     return reply.code(401).send({
@@ -43,7 +55,7 @@ export async function userAuthMiddleware(request: FastifyRequest, reply: Fastify
   }
 
   const token = authorization.slice('Bearer '.length).trim();
-  const payload = decodeAccessToken(token);
+  const payload = verifyAccessToken(token, accessSecret);
 
   if (!payload?.userId || payload.type !== 'access') {
     return reply.code(401).send({

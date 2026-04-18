@@ -1,5 +1,8 @@
 import Fastify from 'fastify';
+import * as Sentry from '@sentry/node';
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { commonServiceEnvSchema, loadEnv } from '@thinkai/config';
@@ -28,10 +31,44 @@ const env = loadEnv(commonServiceEnvSchema.merge(z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM_EMAIL: z.string().email().default('no-reply@thinkai.dev'),
-  CORS_ORIGIN: z.string().default('http://localhost:3000,http://localhost:3001')
+  CORS_ORIGIN: z.string().default('http://localhost:3000,http://localhost:3001'),
+  SENTRY_DSN: z.string().url().optional(),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
+  METRICS_NAMESPACE: z.string().default('ThinkAI/Services'),
+  RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000)
 })));
 
+const createCloudWatchMetricEvent = (
+  namespace: string,
+  metricName: string,
+  value: number,
+  unit: 'Count' | 'Milliseconds' | 'Seconds',
+  dimensions: Record<string, string>
+) => ({
+  _aws: {
+    Timestamp: Date.now(),
+    CloudWatchMetrics: [{
+      Namespace: namespace,
+      Dimensions: [Object.keys(dimensions)],
+      Metrics: [{ Name: metricName, Unit: unit }]
+    }]
+  },
+  ...dimensions,
+  [metricName]: value
+});
+
 const allowedOrigins = env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
+const sentryDsn = env.SENTRY_DSN;
+const metricsNamespace = env.METRICS_NAMESPACE;
+
+if (sentryDsn) {
+  Sentry.init({
+    dsn: sentryDsn,
+    environment: env.NODE_ENV,
+    tracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE
+  });
+}
 
 const emailService = new EmailService({
   smtpHost: env.SMTP_HOST,
@@ -54,11 +91,31 @@ const authService = new AuthService(new AuthStore(), emailService, {
 
 const authController = new AuthController(authService, {
   refreshCookieName: env.REFRESH_COOKIE_NAME,
-  secureCookie: env.NODE_ENV === 'production'
+  secureCookie: env.NODE_ENV === 'production',
+  sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
+  cookiePath: '/',
+  exposeRefreshTokenInResponse: env.NODE_ENV !== 'production'
 });
 
 const app = Fastify({
-  logger: { level: env.LOG_LEVEL },
+  logger: {
+    level: env.LOG_LEVEL,
+    redact: {
+      paths: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        'res.headers.set-cookie',
+        'password',
+        'accessToken',
+        'refreshToken',
+        'token',
+        'otp',
+        'smtpPass'
+      ],
+      censor: '[REDACTED]'
+    }
+  },
+  disableRequestLogging: true,
   requestIdHeader: 'x-request-id',
   genReqId: () => crypto.randomUUID()
 });
@@ -75,14 +132,53 @@ void app.register(cors, {
   }
 });
 
+void app.register(helmet, { global: true });
+void app.register(rateLimit, {
+  global: true,
+  max: env.RATE_LIMIT_MAX,
+  timeWindow: env.RATE_LIMIT_WINDOW_MS
+});
+
 app.addHook('onResponse', async (request, reply) => {
   app.log.info({
     requestId: request.id,
-    route: request.url,
+    route: request.routeOptions?.url ?? request.url,
     method: request.method,
     statusCode: reply.statusCode,
     responseTimeMs: reply.elapsedTime
   });
+
+  app.log.info(createCloudWatchMetricEvent(
+    metricsNamespace,
+    'ApiLatencyMs',
+    reply.elapsedTime,
+    'Milliseconds',
+    {
+      service: env.SERVICE_NAME,
+      route: request.routeOptions?.url ?? request.url,
+      method: request.method
+    }
+  ));
+
+  if (reply.statusCode >= 500) {
+    app.log.info(createCloudWatchMetricEvent(
+      metricsNamespace,
+      'ApiErrorCount',
+      1,
+      'Count',
+      {
+        service: env.SERVICE_NAME,
+        route: request.routeOptions?.url ?? request.url,
+        method: request.method
+      }
+    ));
+  }
+});
+
+app.addHook('onError', async (_request, _reply, error) => {
+  if (sentryDsn) {
+    Sentry.captureException(error);
+  }
 });
 
 app.addHook('preHandler', globalApiRateLimit);

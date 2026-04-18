@@ -1,0 +1,15 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "ThinkAI Postgres",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "thinkai",
+      "Username": "thinkai",
+      "Password": "thinkai",
+      "SavePassword": true,
+      "SSLMode": "prefer"
+    }
+  }
+}

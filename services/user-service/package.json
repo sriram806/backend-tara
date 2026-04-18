@@ -13,6 +13,9 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
+    "@fastify/helmet": "^13.0.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@sentry/node": "^9.15.0",
     "@thinkai/config": "workspace:*",
     "@thinkai/db": "workspace:*",
     "@thinkai/types": "workspace:*",
@@ -20,7 +23,11 @@
     "drizzle-orm": "^0.36.4",
     "fastify": "^5.2.1",
     "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.4.1",
     "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.9"
   }
 }

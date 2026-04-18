@@ -11,7 +11,7 @@ export function setupWebSockets(server: HTTPServer) {
     }
   });
 
-  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+  const redisUrl = process.env.REDIS_URL ?? 'redis://redis:6379';
   const pubClient = new Redis(redisUrl);
   const subClient = pubClient.duplicate();
 
@@ -21,11 +21,22 @@ export function setupWebSockets(server: HTTPServer) {
   // The subscriber for handling background worker events (e.g. from Python BullMQ worker)
   const eventSubscriber = pubClient.duplicate();
   
-  eventSubscriber.subscribe('ws:job:completed', 'ws:job:failed', (err) => {
+  eventSubscriber.subscribe(
+    'ws:job:completed',
+    'ws:job:failed',
+    'ws:resume:completed',
+    'ws:resume:failed',
+    'ws:roadmap:completed',
+    'ws:roadmap:failed',
+    'ws:jobs:completed',
+    'ws:jobs:failed',
+    'ws:notification:created',
+    (err) => {
     if (err) {
       console.error('Failed to subscribe to Redis events:', err);
     }
-  });
+    }
+  );
 
   eventSubscriber.on('message', (channel, message) => {
     try {

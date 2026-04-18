@@ -6,13 +6,6 @@ import { replyOk } from '../utils/response';
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
-  async health() {
-    return {
-      status: 'ok',
-      service: 'user-service'
-    };
-  }
-
   async me(_request: FastifyRequest, reply: FastifyReply) {
     const userId = _request.userContext?.userId;
     if (!userId) {
@@ -20,7 +13,7 @@ export class UserController {
         success: false,
         error: {
           code: 'UNAUTHORIZED',
-          message: 'User context is missing'
+          message: 'User id is missing'
         }
       });
     }
@@ -47,7 +40,7 @@ export class UserController {
         success: false,
         error: {
           code: 'USER_NOT_FOUND',
-          message: 'User does not exist'
+          message: 'User does not exist in Database'
         }
       });
     }
@@ -56,17 +49,39 @@ export class UserController {
   }
 
   async updateMe(request: FastifyRequest, reply: FastifyReply) {
+    const userId = request.userContext?.userId;
+    if (!userId) {
+      return reply.code(401).send({
+        success: false,
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'User id is missing'
+        }
+      });
+    }
+
     const input = patchMeSchema.parse(request.body);
 
     try {
-      return replyOk(reply, await this.userService.updateMe(input));
+      const updated = await this.userService.updateMe(userId, input);
+      if (!updated) {
+        return reply.code(404).send({
+          success: false,
+          error: {
+            code: 'USER_NOT_FOUND',
+            message: 'User does not exist'
+          }
+        });
+      }
+
+      return replyOk(reply, updated);
     } catch (error) {
-      if (error instanceof Error && error.message === 'UPDATE_ME_NOT_IMPLEMENTED') {
+      if (error instanceof Error && error.message === 'DATABASE_NOT_CONFIGURED') {
         return reply.code(501).send({
           success: false,
           error: {
-            code: 'UPDATE_ME_NOT_IMPLEMENTED',
-            message: 'Update profile is not implemented yet'
+            code: 'DATABASE_NOT_CONFIGURED',
+            message: 'Database is not configured for user-service'
           }
         });
       }

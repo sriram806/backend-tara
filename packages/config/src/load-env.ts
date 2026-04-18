@@ -1,4 +1,6 @@
 import { config as loadDotenv } from 'dotenv';
+import fs from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 
 const baseEnvSchema = z.object({
@@ -18,7 +20,21 @@ export function loadEnv<TSchema extends z.ZodRawShape>(
   schema?: z.ZodObject<TSchema>,
   options?: LoadEnvOptions
 ): BaseEnv & (TSchema extends z.ZodRawShape ? z.infer<z.ZodObject<TSchema>> : Record<string, never>) {
-  loadDotenv({ path: options?.envFilePath });
+  const envCandidates = [
+    options?.envFilePath,
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(__dirname, '../../../.env')
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  const loadedEnvFiles = new Set<string>();
+  for (const envFile of envCandidates) {
+    const resolvedPath = path.resolve(envFile);
+    if (loadedEnvFiles.has(resolvedPath) || !fs.existsSync(resolvedPath)) {
+      continue;
+    }
+    loadDotenv({ path: resolvedPath, override: false });
+    loadedEnvFiles.add(resolvedPath);
+  }
 
   const mergedSchema = schema ? baseEnvSchema.merge(schema) : baseEnvSchema;
   const result = mergedSchema.safeParse(process.env);

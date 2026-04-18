@@ -14,6 +14,8 @@
   "dependencies": {
     "@fastify/cors": "^10.0.1",
     "@fastify/helmet": "^13.0.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@sentry/node": "^9.15.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "@thinkai/config": "workspace:*",
     "@thinkai/types": "workspace:*",

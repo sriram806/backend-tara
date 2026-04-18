@@ -1,11 +1,14 @@
-import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { AnalysisService } from '../services/analysis.service';
 import { createAnalysisJobSchema } from '../schemas/job.schema';
+import { requireSubscription } from '../middleware/subscription.middleware';
+import { userAuthMiddleware } from '../middleware/auth.middleware';
 
-export const analysisRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
-  app.post('/jobs', async (request, reply) => {
-    // In a real app, this should come from a verified JWT token in the request
-    const userId = (request as any).user?.id || 'test-user-id';
+export const analysisRoutes = async (app: any) => {
+  app.post('/jobs', { preHandler: [userAuthMiddleware, requireSubscription('career')] }, async (request: any, reply: any) => {
+    const userId = request.userContext?.userId;
+    if (!userId) {
+      return reply.code(401).send({ success: false, error: 'Unauthorized' });
+    }
     
     try {
       const data = createAnalysisJobSchema.parse(request.body);
@@ -21,7 +24,7 @@ export const analysisRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
     }
   });
 
-  app.get('/jobs/:jobId', async (request: any, reply) => {
+  app.get('/jobs/:jobId', async (request: any, reply: any) => {
     const userId = request.user?.id || 'test-user-id';
     const { jobId } = request.params;
     

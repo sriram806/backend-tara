@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lt } from 'drizzle-orm';
 import { getDb, isDatabaseConfigured, otpVerifications, refreshTokens, userProfiles, users } from '@thinkai/db';
 
 export type UserRole = 'guest' | 'free' | 'pro' | 'admin';
@@ -12,6 +12,7 @@ export type UserRecord = {
   role: UserRole;
   status: 'active' | 'suspended' | 'deleted';
   emailVerified: boolean;
+  createdAt: Date;
 };
 
 export type OtpRecord = {
@@ -28,7 +29,6 @@ type CreateUserInput = {
   email: string;
   passwordHash: string;
   fullName?: string;
-  targetRole?: string;
   preferences?: Record<string, unknown>;
 };
 
@@ -75,7 +75,8 @@ export class AuthStore {
         passwordHash: row[0].passwordHash,
         role: row[0].role,
         status: row[0].status,
-        emailVerified: row[0].emailVerified
+        emailVerified: row[0].emailVerified,
+        createdAt: row[0].createdAt
       };
     }
 
@@ -94,7 +95,8 @@ export class AuthStore {
         passwordHash: row[0].passwordHash,
         role: row[0].role,
         status: row[0].status,
-        emailVerified: row[0].emailVerified
+        emailVerified: row[0].emailVerified,
+        createdAt: row[0].createdAt
       };
     }
 
@@ -120,7 +122,6 @@ export class AuthStore {
       await this.db.insert(userProfiles).values({
         userId: newUser.id,
         fullName: derivedFullName,
-        targetRole: input.targetRole,
         preferences: input.preferences ?? {}
       });
 
@@ -130,7 +131,8 @@ export class AuthStore {
         passwordHash: newUser.passwordHash,
         role: newUser.role,
         status: newUser.status,
-        emailVerified: newUser.emailVerified
+        emailVerified: newUser.emailVerified,
+        createdAt: newUser.createdAt
       };
     }
 
@@ -140,12 +142,53 @@ export class AuthStore {
       passwordHash: input.passwordHash,
       role: 'free',
       status: 'active',
-      emailVerified: false
+      emailVerified: false,
+      createdAt: new Date()
     };
 
     this.memoryUsers.set(input.email, user);
     this.memoryUsersById.set(user.id, user);
     return user;
+  }
+
+  async deleteExpiredUnverifiedUserByEmail(email: string, olderThan: Date) {
+    if (this.db) {
+      const [staleUser] = await this.db
+        .select({
+          id: users.id
+        })
+        .from(users)
+        .where(
+          and(
+            eq(users.email, email),
+            eq(users.emailVerified, false),
+            lt(users.createdAt, olderThan)
+          )
+        )
+        .limit(1);
+
+      if (!staleUser) {
+        return false;
+      }
+
+      await this.db.delete(users).where(eq(users.id, staleUser.id));
+      return true;
+    }
+
+    const staleUser = this.memoryUsers.get(email);
+    if (!staleUser || staleUser.emailVerified) {
+      return false;
+    }
+
+    if (staleUser.createdAt >= olderThan) {
+      return false;
+    }
+
+    this.memoryUsers.delete(email);
+    this.memoryUsersById.delete(staleUser.id);
+    this.memoryOtp.delete(`${email}:VERIFY_EMAIL`);
+
+    return true;
   }
 
   async markUserEmailVerified(userId: string) {

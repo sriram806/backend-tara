@@ -16,7 +16,7 @@ const AiJobSchema: Schema = new Schema(
   {
     jobId: { type: String, required: true, unique: true },
     userId: { type: String, required: true },
-    type: { type: String, required: true, enum: ['analysis', 'resume', 'roadmap'] },
+    type: { type: String, required: true, enum: ['analysis', 'resume', 'roadmap', 'jobs'] },
     status: { 
       type: String, 
       required: true, 

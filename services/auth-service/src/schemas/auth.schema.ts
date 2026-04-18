@@ -4,7 +4,6 @@ export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(72),
   fullName: z.string().min(2).max(120).optional(),
-  targetRole: z.string().min(2).max(50).optional(),
   preferences: z.record(z.unknown()).optional()
 });
 

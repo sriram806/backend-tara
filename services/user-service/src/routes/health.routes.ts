@@ -1,8 +1,9 @@
 import { FastifyPluginAsync } from 'fastify';
-import { UserController } from '../controllers/user.controller';
+import { UserHealthController } from '../controllers/health.controller';
 
-export const healthRoutes = (controller: UserController): FastifyPluginAsync => {
+export const healthRoutes = (controller: UserHealthController): FastifyPluginAsync => {
   return async (app) => {
-    app.get('/health', async () => controller.health());
+    app.get('/', async () => controller.health());
+    app.get('/ready', async () => controller.ready());
   };
 };

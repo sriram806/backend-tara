@@ -2,7 +2,16 @@ node_modules
 **/node_modules
 dist
 **/dist
+**/.next
+**/.pytest_cache
+**/__pycache__
+**/*.log
 .git
 .gitignore
 .vscode
 blueprints
+coverage
+.env
+.env.*
+!.env.example
+tests/load

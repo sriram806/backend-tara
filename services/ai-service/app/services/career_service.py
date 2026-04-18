@@ -10,6 +10,7 @@ from app.database import db, redis_client
 from app.models.career_analysis_report import CareerAnalysisReport
 from app.services.llm_gateway import llm_gateway
 from app.services.nlp_pipeline import nlp_pipeline
+from app.services.resume_service import resume_service
 from app.services.semantic_matcher import semantic_matcher
 from app.utils.security import sanitize_input
 
@@ -138,6 +139,19 @@ async def analyze_career(data: Dict[str, Any], user_id: str = None, force_refres
     quiz_score = data.get("quizScore")
 
     resume_text = _extract_resume_text(data)
+    if effective_user_id != "anonymous":
+        try:
+            stored_resume = await resume_service.get_stored_resume(effective_user_id)
+        except Exception:
+            stored_resume = None
+
+        if stored_resume:
+            structured_resume = stored_resume.get("structured_resume") or {}
+            stored_raw_text = sanitize_input(str(stored_resume.get("raw_text") or ""))
+            if stored_raw_text.strip():
+                resume_text = stored_raw_text
+                data["resumeData"] = structured_resume
+
     if len(resume_text.strip()) < 20:
         raise ValueError("Resume input is too short for analysis")
 

@@ -15,6 +15,9 @@ import { sendSuccess } from '../utils/response';
 type ControllerConfig = {
   refreshCookieName: string;
   secureCookie: boolean;
+  sameSite: 'strict' | 'lax' | 'none';
+  cookiePath: string;
+  exposeRefreshTokenInResponse: boolean;
 };
 
 export class AuthController {
@@ -36,14 +39,15 @@ export class AuthController {
     reply.setCookie(this.config.refreshCookieName, data.refreshToken, {
       httpOnly: true,
       secure: this.config.secureCookie,
-      sameSite: 'strict',
-      path: '/auth',
+      sameSite: this.config.sameSite,
+      path: this.config.cookiePath,
       maxAge: 30 * 24 * 60 * 60
     });
 
     return sendSuccess(reply, {
       accessToken: data.accessToken,
-      user: data.user
+      user: data.user,
+      ...(this.config.exposeRefreshTokenInResponse ? { refreshToken: data.refreshToken } : {})
     });
   }
 
@@ -70,14 +74,15 @@ export class AuthController {
     reply.setCookie(this.config.refreshCookieName, data.refreshToken, {
       httpOnly: true,
       secure: this.config.secureCookie,
-      sameSite: 'strict',
-      path: '/auth',
+      sameSite: this.config.sameSite,
+      path: this.config.cookiePath,
       maxAge: 30 * 24 * 60 * 60
     });
 
     return sendSuccess(reply, {
       accessToken: data.accessToken,
-      user: data.user
+      user: data.user,
+      ...(this.config.exposeRefreshTokenInResponse ? { refreshToken: data.refreshToken } : {})
     });
   }
 
@@ -91,7 +96,7 @@ export class AuthController {
     }
 
     reply.clearCookie(this.config.refreshCookieName, {
-      path: '/auth'
+      path: this.config.cookiePath
     });
 
     return sendSuccess(reply, { loggedOut: true });
@@ -106,6 +111,22 @@ export class AuthController {
   async verifyEmail(request: FastifyRequest, reply: FastifyReply) {
     const input = verifyEmailSchema.parse(request.body);
     const data = await this.authService.verifyEmail(input);
+
+    if ('refreshToken' in data && typeof data.refreshToken === 'string') {
+      reply.setCookie(this.config.refreshCookieName, data.refreshToken, {
+        httpOnly: true,
+        secure: this.config.secureCookie,
+        sameSite: this.config.sameSite,
+        path: this.config.cookiePath,
+        maxAge: 30 * 24 * 60 * 60
+      });
+    }
+
+    if (!this.config.exposeRefreshTokenInResponse && 'refreshToken' in data) {
+      const { refreshToken: _refreshToken, ...safeData } = data;
+      return sendSuccess(reply, safeData);
+    }
+
     return sendSuccess(reply, data);
   }
 

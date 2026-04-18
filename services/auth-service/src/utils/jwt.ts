@@ -50,7 +50,11 @@ export function verifyToken(token: string, secret: string, expectedType: TokenTy
     }
 
     return payload;
-  } catch {
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
     throw new AppError('INVALID_TOKEN', 'Invalid or expired token', 401);
   }
 }

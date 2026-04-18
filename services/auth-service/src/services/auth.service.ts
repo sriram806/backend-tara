@@ -30,6 +30,8 @@ type AuthContext = {
 };
 
 export class AuthService {
+  private static readonly UNVERIFIED_ACCOUNT_TTL_MS = 24 * 60 * 60 * 1000;
+
   constructor(
     private readonly store: AuthStore,
     private readonly emailService: EmailService,
@@ -37,6 +39,8 @@ export class AuthService {
   ) {}
 
   async register(input: RegisterInput) {
+    await this.cleanupExpiredUnverifiedAccount(input.email);
+
     const existing = await this.store.findUserByEmail(input.email);
     if (existing) {
       throw new AppError('EMAIL_ALREADY_EXISTS', 'Account already exists', 409);
@@ -47,7 +51,6 @@ export class AuthService {
       email: input.email,
       passwordHash,
       fullName: input.fullName,
-      targetRole: input.targetRole,
       preferences: input.preferences
     });
 
@@ -61,6 +64,8 @@ export class AuthService {
   }
 
   async login(input: LoginInput, context: AuthContext) {
+    await this.cleanupExpiredUnverifiedAccount(input.email);
+
     const user = await this.store.findUserByEmail(input.email);
     if (!user) {
       throw new AppError('INVALID_CREDENTIALS', 'Invalid credentials', 401);
@@ -110,6 +115,11 @@ export class AuthService {
   }
 
   async sendVerifyOtp(input: SendVerifyOtpInput) {
+    const deleted = await this.cleanupExpiredUnverifiedAccount(input.email);
+    if (deleted) {
+      throw new AppError('ACCOUNT_EXPIRED', 'Your unverified account was deleted after 24 hours. Please register again.', 410);
+    }
+
     const user = await this.store.findUserByEmail(input.email);
     if (!user) {
       throw new AppError('USER_NOT_FOUND', 'User does not exist', 404);
@@ -124,6 +134,11 @@ export class AuthService {
   }
 
   async verifyEmail(input: VerifyEmailInput) {
+    const deleted = await this.cleanupExpiredUnverifiedAccount(input.email);
+    if (deleted) {
+      throw new AppError('ACCOUNT_EXPIRED', 'Your unverified account was deleted after 24 hours. Please register again.', 410);
+    }
+
     const user = await this.store.findUserByEmail(input.email);
     if (!user) {
       throw new AppError('USER_NOT_FOUND', 'User does not exist', 404);
@@ -132,8 +147,13 @@ export class AuthService {
     await this.validateOtpOrThrow(user.email, 'VERIFY_EMAIL', input.otp);
     await this.store.markUserEmailVerified(user.id);
 
+    const session = await this.issueTokenPair(user.id, user.role, {});
+
     return {
-      verified: true
+      verified: true,
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      user: session.user
     };
   }
 
@@ -243,5 +263,12 @@ export class AuthService {
     }
 
     await this.store.deleteOtp(record.id);
+  }
+
+  private cleanupExpiredUnverifiedAccount(email: string) {
+    return this.store.deleteExpiredUnverifiedUserByEmail(
+      email,
+      new Date(Date.now() - AuthService.UNVERIFIED_ACCOUNT_TTL_MS)
+    );
   }
 }
