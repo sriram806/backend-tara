@@ -20,7 +20,14 @@ const upsertTemplateSchema = z.object({
   mcqCount: z.coerce.number().int().min(0).optional(),
   fillBlankCount: z.coerce.number().int().min(0).optional(),
   codingCount: z.coerce.number().int().min(0).optional(),
-  isPublished: z.boolean().optional()
+  isPublished: z.boolean().optional(),
+  securityConfig: z.object({
+    enforceFullscreen: z.boolean(),
+    disableCopyPaste: z.boolean(),
+    trackTabSwitches: z.boolean(),
+    shuffleQuestions: z.boolean(),
+    maxTabSwitches: z.number().optional()
+  }).optional()
 });
 
 const bulkQuestionSchema = z.object({
@@ -113,6 +120,18 @@ export const examRoutes: FastifyPluginAsync = async (app) => {
     return replyOk(reply, result, 201);
   });
 
+  app.post('/admin/templates/:skillName/generate-questions', { preHandler: adminAuthMiddleware }, async (request, reply) => {
+    const skillName = z.string().min(1).parse((request.params as { skillName?: string }).skillName);
+    const schema = z.object({
+      count: z.coerce.number().int().min(1).max(20).default(5),
+      difficulty: z.coerce.number().int().min(1).max(5).default(3),
+      type: z.enum(['MCQ', 'FILL', 'CODE']).default('MCQ')
+    });
+    const payload = schema.parse(request.body ?? {});
+    const result = await ExamService.generateAiQuestions(skillName, payload);
+    return replyOk(reply, result, 201);
+  });
+
   app.patch('/admin/questions/:questionId', { preHandler: adminAuthMiddleware }, async (request, reply) => {
     const questionId = z.string().uuid().parse((request.params as { questionId?: string }).questionId);
     const payload = updateQuestionSchema.parse(request.body ?? {});
@@ -123,6 +142,95 @@ export const examRoutes: FastifyPluginAsync = async (app) => {
   app.delete('/admin/questions/:questionId', { preHandler: adminAuthMiddleware }, async (request, reply) => {
     const questionId = z.string().uuid().parse((request.params as { questionId?: string }).questionId);
     const result = await ExamService.deleteQuestion(questionId);
+    return replyOk(reply, result);
+  });
+
+  app.get('/admin/requests', { preHandler: adminAuthMiddleware }, async (_request, reply) => {
+    const result = await ExamService.listSkillRequests();
+    return replyOk(reply, result);
+  });
+
+  app.patch('/admin/requests/:requestId', { preHandler: adminAuthMiddleware }, async (request, reply) => {
+    const requestId = z.string().uuid().parse((request.params as { requestId?: string }).requestId);
+    const { status } = z.object({ status: z.enum(['pending', 'approved', 'rejected', 'implemented']) }).parse(request.body ?? {});
+    const result = await ExamService.updateSkillRequestStatus(requestId, status);
+    return replyOk(reply, result);
+  });
+
+  app.get('/admin/moderation/overview', { preHandler: adminAuthMiddleware }, async (_request, reply) => {
+    const result = await ExamService.getModerationOverview();
+    return replyOk(reply, result);
+  });
+
+  app.get('/admin/analytics/:skillName', { preHandler: adminAuthMiddleware }, async (request, reply) => {
+    const skillName = z.string().min(1).parse((request.params as { skillName?: string }).skillName);
+    const result = await ExamService.getExamAnalytics(skillName);
+    return replyOk(reply, result);
+  });
+
+  app.get('/certificate/:attemptId', { preHandler: userAuthMiddleware }, async (request, reply) => {
+    const userId = request.userContext?.userId;
+    if (!userId) return reply.code(401).send({ success: false, error: 'Unauthorized' });
+    
+    const attemptId = z.string().uuid().parse((request.params as { attemptId?: string }).attemptId);
+    const result = await ExamService.getCertificate(attemptId, userId);
+    return replyOk(reply, result);
+  });
+
+  app.get('/certificate/verify/:hash', async (request, reply) => {
+    const hash = z.string().min(10).parse((request.params as { hash?: string }).hash);
+    const result = await ExamService.verifyCertificate(hash);
+    return replyOk(reply, result);
+  });
+
+  app.post('/session/:sessionId/log', { preHandler: userAuthMiddleware }, async (request, reply) => {
+    const userId = request.userContext?.userId;
+    if (!userId) return reply.code(401).send({ success: false, error: 'Unauthorized' });
+
+    const sessionId = z.string().uuid().parse((request.params as { sessionId?: string }).sessionId);
+    const schema = z.object({
+      event: z.string().min(1),
+      metadata: z.record(z.string(), z.unknown()).optional()
+    });
+    const payload = schema.parse(request.body ?? {});
+    
+    const result = await ExamService.logProctoringEvent(userId, sessionId, payload.event, payload.metadata);
+    return replyOk(reply, result);
+  });
+
+  app.get('/admin/attempts/:attemptId/audit', { preHandler: adminAuthMiddleware }, async (request, reply) => {
+    const attemptId = z.string().uuid().parse((request.params as { attemptId?: string }).attemptId);
+    const result = await ExamService.getAuditTrail(attemptId);
+    return replyOk(reply, result);
+  });
+
+  app.post('/admin/assign', { preHandler: adminAuthMiddleware }, async (request, reply) => {
+    const adminId = request.userContext?.userId;
+    if (!adminId) return reply.code(401).send({ success: false, error: 'Unauthorized' });
+
+    const schema = z.object({
+      examId: z.string().uuid(),
+      userId: z.string().uuid().optional(),
+      teamId: z.string().uuid().optional(),
+      organizationId: z.string().uuid().optional(),
+      deadlineAt: z.string().optional(),
+      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional()
+    });
+    const payload = schema.parse(request.body ?? {});
+    const result = await ExamService.assignExam(adminId, payload);
+    return replyOk(reply, result);
+  });
+
+  app.get('/assignments', { preHandler: userAuthMiddleware }, async (request, reply) => {
+    const userId = request.userContext?.userId;
+    if (!userId) return reply.code(401).send({ success: false, error: 'Unauthorized' });
+    const result = await ExamService.listUserAssignments(userId);
+    return replyOk(reply, result);
+  });
+
+  app.get('/admin/org/:orgId/overview', { preHandler: adminAuthMiddleware }, async (request, reply) => {
+    const orgId = z.string().uuid().parse((request.params as { orgId?: string }).orgId);
+    const result = await ExamService.getOrganizationOverview(orgId);
     return replyOk(reply, result);
   });
 };

@@ -12,7 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 export const authProviderEnum = pgEnum('auth_provider', ['local', 'google', 'github']);
-export const userRoleEnum = pgEnum('user_role', ['guest', 'user', 'support', 'moderator', 'admin']);
+export const userRoleEnum = pgEnum('user_role', ['user', 'admin', 'moderator', 'lite']);
 export const userStatusEnum = pgEnum('user_status', ['active', 'suspended', 'deleted']);
 export const otpTypeEnum = pgEnum('otp_type', ['VERIFY_EMAIL', 'RESET_PASSWORD']);
 export const billingPlanEnum = pgEnum('billing_plan', ['LITE', 'PRO', 'ENTERPRISE']);
@@ -59,6 +59,7 @@ export const moderationReportStatusEnum = pgEnum('moderation_report_status', ['p
 export const moderationReportCategoryEnum = pgEnum('moderation_report_category', [
   'spam', 'abuse', 'harassment', 'fraud', 'inappropriate_content', 'other'
 ]);
+export const assignmentStatusEnum = pgEnum('assignment_status', ['PENDING', 'COMPLETED', 'EXPIRED']);
 
 export type ResumeSectionScores = {
   summary: number;
@@ -76,6 +77,7 @@ export type ResumeKeywordSuggestion = {
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name'),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   plan: billingPlanEnum('plan'),
@@ -130,6 +132,18 @@ export const organizationMembers = pgTable('organization_members', {
   organizationMemberOrgIndex: index('organization_members_org_idx').on(table.organizationId),
   organizationMemberUserIndex: index('organization_members_user_idx').on(table.userId),
   organizationMemberRoleIndex: index('organization_members_role_idx').on(table.organizationId, table.role)
+}));
+
+export const teams = pgTable('teams', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  createdBy: uuid('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  teamOrgIndex: index('teams_organization_idx').on(table.organizationId)
 }));
 
 export const organizationInvites = pgTable('organization_invites', {
@@ -351,6 +365,18 @@ export const skillExams = pgTable('skill_exams', {
   fillBlankCount: integer('fill_blank_count').notNull().default(10),
   codingCount: integer('coding_count').notNull().default(0),
   isPublished: boolean('is_published').notNull().default(true),
+  securityConfig: jsonb('security_config').$type<{
+    enforceFullscreen: boolean;
+    disableCopyPaste: boolean;
+    trackTabSwitches: boolean;
+    shuffleQuestions: boolean;
+    maxTabSwitches?: number;
+  }>().notNull().default({
+    enforceFullscreen: false,
+    disableCopyPaste: true,
+    trackTabSwitches: true,
+    shuffleQuestions: true
+  }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
   organizationIndex: index('skill_exams_org_idx').on(table.organizationId),
@@ -398,6 +424,11 @@ export const userExams = pgTable('user_exams', {
   answersJson: jsonb('answers_json').$type<Record<string, string>>().notNull().default({}),
   questionSnapshotJson: jsonb('question_snapshot_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
   evaluationJson: jsonb('evaluation_json').$type<Record<string, unknown>>().notNull().default({}),
+  proctoringLogsJson: jsonb('proctoring_logs_json').$type<Array<{
+    event: string;
+    timestamp: string;
+    metadata?: Record<string, unknown>;
+  }>>().notNull().default([]),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   submittedAt: timestamp('submitted_at', { withTimezone: true })
@@ -421,6 +452,41 @@ export const skillProgress = pgTable('skill_progress', {
   userSkillUniqueIndex: uniqueIndex('skill_progress_user_skill_unique_idx').on(table.userId, table.skillName),
   userSkillStatusIndex: index('skill_progress_user_status_idx').on(table.userId, table.status),
   skillUpdatedAtIndex: index('skill_progress_updated_at_idx').on(table.updatedAt)
+}));
+
+export const issuedCertificates = pgTable('issued_certificates', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  examAttemptId: uuid('exam_attempt_id').notNull().references(() => userExams.id, { onDelete: 'cascade' }),
+  skillName: text('skill_name').notNull(),
+  certificateHash: text('certificate_hash').notNull().unique(), // For verification URL
+  score: integer('score').notNull(),
+  percentage: integer('percentage').notNull(),
+  issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({})
+}, (table) => ({
+  certUserIndex: index('issued_certificates_user_idx').on(table.userId),
+  certAttemptIndex: index('issued_certificates_attempt_idx').on(table.examAttemptId),
+  certHashIndex: index('issued_certificates_hash_idx').on(table.certificateHash)
+}));
+
+export const examAssignments = pgTable('exam_assignments', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  examId: uuid('exam_id').notNull().references(() => skillExams.id, { onDelete: 'cascade' }),
+  assignedBy: uuid('assigned_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: assignmentStatusEnum('status').notNull().default('PENDING'),
+  priority: text('priority').notNull().default('MEDIUM'), // LOW, MEDIUM, HIGH
+  deadlineAt: timestamp('deadline_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  assignmentOrgIndex: index('exam_assignments_org_idx').on(table.organizationId),
+  assignmentTeamIndex: index('exam_assignments_team_idx').on(table.teamId),
+  assignmentUserIndex: index('exam_assignments_user_idx').on(table.userId),
+  assignmentExamIndex: index('exam_assignments_exam_idx').on(table.examId)
 }));
 
 export const refreshTokens = pgTable('refresh_tokens', {
@@ -866,6 +932,19 @@ export const webhookEndpoints = pgTable('webhook_endpoints', {
   webhookEndpointActiveIdx: index('webhook_endpoints_active_idx').on(table.isActive)
 }));
 
+export const skillRequests = pgTable('skill_requests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  skillName: text('skill_name').notNull(),
+  status: text('status').notNull().default('pending'), // pending, approved, rejected, implemented
+  requestCount: integer('request_count').notNull().default(1),
+  lastRequestedAt: timestamp('last_requested_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  skillRequestNameIdx: index('skill_requests_name_idx').on(table.skillName),
+  skillRequestStatusIdx: index('skill_requests_status_idx').on(table.status)
+}));
+
 export const schema = {
   users,
   userProfiles,
@@ -917,5 +996,6 @@ export const schema = {
   moderationReports,
   customRoles,
   // Phase 3 Admin
-  webhookEndpoints
+  webhookEndpoints,
+  skillRequests
 };

@@ -9,6 +9,7 @@ from app.routers.roadmap import router as roadmap_router
 from app.routers.jobs import router as jobs_router
 from app.routers.interview import router as interview_router
 from app.routers.github import router as github_router
+from app.routers.exam import router as exam_router
 from app.core.config import settings
 from app.workers.bullmq_consumer import start_worker
 
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs_router)
     app.include_router(interview_router)
     app.include_router(github_router)
+    app.include_router(exam_router)
     return app
 
 

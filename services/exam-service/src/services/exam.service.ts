@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import axios from 'axios';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   examQuestions,
@@ -6,8 +7,14 @@ import {
   resumeSkills,
   skillExams,
   skillProgress,
+  skillRequests,
   userExams,
-  userResumes
+  userResumes,
+  issuedCertificates,
+  examAssignments,
+  organizations,
+  organizationMembers,
+  users
 } from '@thinkai/db';
 
 type QuestionSnapshot = {
@@ -48,6 +55,13 @@ type TemplateInput = {
   fillBlankCount?: number;
   codingCount?: number;
   isPublished?: boolean;
+  securityConfig?: {
+    enforceFullscreen: boolean;
+    disableCopyPaste: boolean;
+    trackTabSwitches: boolean;
+    shuffleQuestions: boolean;
+    maxTabSwitches?: number;
+  };
 };
 
 type BulkQuestionsInput = {
@@ -472,15 +486,16 @@ export class ExamService {
       const questions = template ? questionsByExamId.get(template.id) ?? [] : [];
       const counts = questions.reduce((acc, question) => {
         acc.total += 1;
-        if (question.type === 'MCQ') {
-          acc.mcq += 1;
-        } else if (question.type === 'FILL') {
-          acc.fill += 1;
-        } else {
-          acc.code += 1;
-        }
+        if (question.type === 'MCQ') acc.mcq += 1;
+        else if (question.type === 'FILL') acc.fill += 1;
+        else acc.code += 1;
+
+        if (question.difficulty <= 2) acc.easy += 1;
+        else if (question.difficulty === 3 || question.difficulty === 4) acc.medium += 1;
+        else acc.hard += 1;
+
         return acc;
-      }, { total: 0, mcq: 0, fill: 0, code: 0 });
+      }, { total: 0, mcq: 0, fill: 0, code: 0, easy: 0, medium: 0, hard: 0 });
 
       const required = template ? {
         mcq: template.mcqCount,
@@ -569,6 +584,66 @@ export class ExamService {
     };
   }
 
+  /**
+   * Returns skills that have at least one published exam.
+   * Used for onboarding recommendations.
+   */
+  static async getSkillSuggestions(query: string, limit = 10) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+
+    // Find published exams that match the query
+    const results = await db.select({
+      skillName: skillExams.skillName,
+      title: skillExams.title,
+      type: skillExams.skillType
+    })
+      .from(skillExams)
+      .where(and(
+        eq(skillExams.isPublished, true),
+        sql`LOWER(${skillExams.skillName}) LIKE ${'%' + query.toLowerCase() + '%'}`
+      ))
+      .limit(limit);
+
+    return results;
+  }
+
+  /**
+   * Records a user request for a missing skill assessment.
+   */
+  static async requestSkill(userId: string, skillName: string) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+    const normalized = normalizeSkillName(skillName);
+
+    // Check if it already exists in requests
+    const [existing] = await db.select()
+      .from(skillRequests)
+      .where(eq(skillRequests.skillName, normalized))
+      .limit(1);
+
+    if (existing) {
+      await db.update(skillRequests)
+        .set({
+          requestCount: existing.requestCount + 1,
+          lastRequestedAt: new Date()
+        })
+        .where(eq(skillRequests.id, existing.id));
+
+      return { message: 'Skill request updated', id: existing.id };
+    }
+
+    const [created] = await db.insert(skillRequests)
+      .values({
+        userId,
+        skillName: normalized,
+        status: 'pending'
+      })
+      .returning();
+
+    return { message: 'Skill request submitted', id: created.id };
+  }
+
   static async getOrCreateSession(userId: string, requestedSkillName?: string) {
     await this.ensureSchemaCompatibility();
     const db = getDb();
@@ -642,6 +717,160 @@ export class ExamService {
     });
   }
 
+  /**
+   * Returns a list of all user-requested skills, prioritized by frequency.
+   */
+  static async listSkillRequests() {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+
+    const results = await db.select()
+      .from(skillRequests)
+      .orderBy(desc(skillRequests.requestCount));
+
+    return results;
+  }
+
+  /**
+   * Updates the status of a skill request.
+   */
+  static async updateSkillRequestStatus(requestId: string, status: 'pending' | 'approved' | 'rejected' | 'implemented') {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+
+    const [updated] = await db.update(skillRequests)
+      .set({ status })
+      .where(eq(skillRequests.id, requestId))
+      .returning();
+
+    return updated;
+  }
+
+  /**
+   * Provides detailed analytics for a specific skill exam.
+   */
+  static async getExamAnalytics(skillName: string) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+    const normalized = normalizeSkillName(skillName);
+
+    // 1. Fetch all attempts for this skill
+    const attempts = await db.select()
+      .from(userExams)
+      .where(eq(userExams.skillName, normalized))
+      .orderBy(desc(userExams.createdAt));
+
+    if (attempts.length === 0) {
+      return {
+        summary: { totalAttempts: 0, passRate: 0, avgScore: 0 },
+        distribution: [],
+        questionPerformance: []
+      };
+    }
+
+    // 2. Calculate summary stats
+    const totalAttempts = attempts.length;
+    const passedAttempts = attempts.filter(a => a.status === 'PASS').length;
+    const passRate = Math.round((passedAttempts / totalAttempts) * 100);
+    const avgScore = Math.round(attempts.reduce((acc, a) => acc + a.percentage, 0) / totalAttempts);
+
+    // 3. Score distribution (deciles)
+    const distribution = Array.from({ length: 10 }, (_, i) => ({
+      range: `${i * 10}-${(i + 1) * 10}%`,
+      count: attempts.filter(a => a.percentage >= i * 10 && a.percentage < (i + 1) * 10).length
+    }));
+
+    // 4. Question performance analysis
+    // We analyze the 'evaluation_json' from user_exams
+    const questionStats = new Map<string, { total: number; correct: number; prompt: string }>();
+
+    for (const attempt of attempts) {
+      const evaluation = (attempt.evaluationJson as any) || {};
+      const questions = (attempt.questionSnapshotJson as any[]) || [];
+
+      for (const q of questions) {
+        const stats = questionStats.get(q.id) || { total: 0, correct: 0, prompt: q.prompt };
+        stats.total += 1;
+        if (evaluation[q.id]?.isCorrect) {
+          stats.correct += 1;
+        }
+        questionStats.set(q.id, stats);
+      }
+    }
+
+    const questionPerformance = Array.from(questionStats.entries()).map(([id, stats]) => ({
+      id,
+      prompt: stats.prompt,
+      successRate: Math.round((stats.correct / stats.total) * 100),
+      totalAttempts: stats.total
+    })).sort((a, b) => a.successRate - b.successRate); // Worst performing questions first
+
+    // 5. Recent Attempts with User Details
+    const recentAttempts = await db.select({
+      id: userExams.id,
+      userName: (users as any).name,
+      status: userExams.status,
+      score: userExams.percentage,
+      createdAt: userExams.createdAt,
+      proctoringLogs: (userExams as any).proctoringLogsJson
+    })
+      .from(userExams)
+      .leftJoin(users, eq(userExams.userId, users.id))
+      .where(eq(userExams.skillName, normalized))
+      .orderBy(desc(userExams.createdAt))
+      .limit(10);
+
+    const mappedAttempts = recentAttempts.map(a => ({
+      id: a.id,
+      userName: a.userName,
+      status: a.status,
+      score: a.score,
+      createdAt: a.createdAt,
+      violationCount: (a.proctoringLogs as any[] || []).filter(l =>
+        ['TAB_SWITCH', 'FULLSCREEN_EXIT', 'WINDOW_BLUR'].includes(l.event)
+      ).length
+    }));
+
+    return {
+      summary: {
+        totalAttempts,
+        passRate,
+        avgScore,
+        trend: attempts.slice(0, 10).map(a => ({ date: a.createdAt.toISOString(), score: a.percentage }))
+      },
+      distribution,
+      questionPerformance,
+      recentAttempts: mappedAttempts
+    };
+  }
+
+  /**
+   * Returns high-level stats for the Admin Moderation Dashboard.
+   */
+  static async getModerationOverview() {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+
+    const [totalRequests] = await db.select({ count: sql<number>`count(*)` }).from(skillRequests);
+    const [pendingRequests] = await db.select({ count: sql<number>`count(*)` }).from(skillRequests).where(eq(skillRequests.status, 'pending'));
+
+    const templates = await db.select().from(skillExams);
+    const draftTemplates = templates.filter(t => !t.isPublished).length;
+    const publishedTemplates = templates.filter(t => t.isPublished).length;
+
+    return {
+      requests: {
+        total: Number(totalRequests?.count ?? 0),
+        pending: Number(pendingRequests?.count ?? 0)
+      },
+      content: {
+        totalExams: templates.length,
+        draft: draftTemplates,
+        published: publishedTemplates
+      }
+    };
+  }
+
   static async upsertTemplate(input: TemplateInput) {
     await this.ensureSchemaCompatibility();
     const db = getDb();
@@ -659,7 +888,13 @@ export class ExamService {
       mcqCount: input.mcqCount ?? defaults.mcqCount,
       fillBlankCount: input.fillBlankCount ?? defaults.fillBlankCount,
       codingCount: input.codingCount ?? defaults.codingCount,
-      isPublished: input.isPublished ?? true
+      isPublished: input.isPublished ?? true,
+      securityConfig: input.securityConfig ?? {
+        enforceFullscreen: false,
+        disableCopyPaste: true,
+        trackTabSwitches: true,
+        shuffleQuestions: true
+      }
     } as const;
 
     if (existing) {
@@ -682,15 +917,16 @@ export class ExamService {
       const questions = await db.select().from(examQuestions).where(eq(examQuestions.examId, row.id));
       const counts = questions.reduce((acc, question) => {
         acc.total += 1;
-        if (question.type === 'MCQ') {
-          acc.mcq += 1;
-        } else if (question.type === 'FILL') {
-          acc.fill += 1;
-        } else {
-          acc.code += 1;
-        }
+        if (question.type === 'MCQ') acc.mcq += 1;
+        else if (question.type === 'FILL') acc.fill += 1;
+        else acc.code += 1;
+
+        if (question.difficulty <= 2) acc.easy += 1;
+        else if (question.difficulty === 3 || question.difficulty === 4) acc.medium += 1;
+        else acc.hard += 1;
+
         return acc;
-      }, { total: 0, mcq: 0, fill: 0, code: 0 });
+      }, { total: 0, mcq: 0, fill: 0, code: 0, easy: 0, medium: 0, hard: 0 });
 
       return {
         ...row,
@@ -704,6 +940,55 @@ export class ExamService {
     const template = await this.getTemplateBySkill(normalizeSkillName(skillName), { requirePublished: false });
     const db = getDb();
     return db.select().from(examQuestions).where(eq(examQuestions.examId, template.id));
+  }
+
+  static async generateAiQuestions(skillName: string, options: { count: number; difficulty: number; type: string }) {
+    await this.ensureSchemaCompatibility();
+    const normalized = normalizeSkillName(skillName);
+    const template = await this.getTemplateBySkill(normalized, { requirePublished: false });
+
+    try {
+      const response = await axios.post(`${process.env.AI_SERVICE_URL}/ai/exam/generate-questions`, {
+        skillName: normalized,
+        count: options.count,
+        difficulty: options.difficulty,
+        type: options.type
+      });
+
+      if (!response.data.success) {
+        throw new Error(response.data.error || 'AI generation failed');
+      }
+
+      const generated = response.data.data.questions as any[];
+      const rows = generated.map((q) => ({
+        examId: template.id,
+        skillName: template.skillName,
+        type: q.type,
+        question: q.question,
+        answer: q.answer,
+        explanation: q.explanation,
+        difficulty: q.difficulty || options.difficulty,
+        marks: q.marks || q.difficulty || options.difficulty,
+        options: q.options || null,
+        placeholder: q.placeholder || null,
+        starterCode: q.starterCode || null,
+        language: q.language || null,
+        metadata: {}
+      }));
+
+      const db = getDb();
+      const inserted = await db.insert(examQuestions).values(rows).returning();
+
+      return {
+        examId: template.id,
+        skillName: template.skillName,
+        inserted: inserted.length,
+        questions: inserted
+      };
+    } catch (error) {
+      console.error('AI Generation Error:', error);
+      throw new Error(`AI Question Generation failed: ${(error as any).message}`);
+    }
   }
 
   static async bulkUpsertQuestions(skillName: string, input: BulkQuestionsInput) {
@@ -909,8 +1194,16 @@ export class ExamService {
           questions: evaluation
         },
         submittedAt: options.submittedAt
-      })
+      } as any)
       .where(eq(userExams.id, session.id));
+
+    if (passed) {
+      try {
+        await this.issueCertificate(session.userId, session.id);
+      } catch (err) {
+        console.error('Failed to issue certificate:', err);
+      }
+    }
 
     const [existingProgress] = await db.select().from(skillProgress).where(and(
       eq(skillProgress.userId, session.userId),
@@ -924,7 +1217,7 @@ export class ExamService {
           lastScore: percentage,
           attempts: session.attemptNumber,
           updatedAt: options.submittedAt
-        })
+        } as any)
         .where(eq(skillProgress.id, existingProgress.id));
     } else {
       await db.insert(skillProgress).values({
@@ -935,7 +1228,7 @@ export class ExamService {
         attempts: session.attemptNumber,
         createdAt: options.submittedAt,
         updatedAt: options.submittedAt
-      });
+      } as any);
     }
 
     return {
@@ -963,12 +1256,42 @@ export class ExamService {
   }
 
   private static selectQuestions(template: typeof skillExams.$inferSelect, questions: Array<typeof examQuestions.$inferSelect>) {
-    const mcq = shuffle(questions.filter((question) => question.type === 'MCQ')).slice(0, template.mcqCount);
-    const fill = shuffle(questions.filter((question) => question.type === 'FILL')).slice(0, template.fillBlankCount);
-    const code = shuffle(questions.filter((question) => question.type === 'CODE')).slice(0, template.codingCount);
+    const pickByDifficulty = (pool: typeof questions, targetCount: number) => {
+      if (targetCount === 0) return [];
+
+      const easy = pool.filter(q => q.difficulty <= 2);
+      const medium = pool.filter(q => q.difficulty === 3 || q.difficulty === 4);
+      const hard = pool.filter(q => q.difficulty >= 5);
+
+      const easyTarget = Math.round(targetCount * 0.5);
+      const mediumTarget = Math.round(targetCount * 0.4);
+      const hardTarget = targetCount - easyTarget - mediumTarget;
+
+      const selectedEasy = shuffle(easy).slice(0, easyTarget);
+      const selectedMedium = shuffle(medium).slice(0, mediumTarget);
+      const selectedHard = shuffle(hard).slice(0, hardTarget);
+
+      const result = [...selectedEasy, ...selectedMedium, ...selectedHard];
+
+      // Fallback: If we don't have enough questions of a specific difficulty, fill with others
+      if (result.length < targetCount) {
+        const remaining = pool.filter(q => !result.find(r => r.id === q.id));
+        result.push(...shuffle(remaining).slice(0, targetCount - result.length));
+      }
+
+      return result;
+    };
+
+    const mcqPool = questions.filter((question) => question.type === 'MCQ');
+    const fillPool = questions.filter((question) => question.type === 'FILL');
+    const codePool = questions.filter((question) => question.type === 'CODE');
+
+    const mcq = pickByDifficulty(mcqPool, template.mcqCount);
+    const fill = pickByDifficulty(fillPool, template.fillBlankCount);
+    const code = pickByDifficulty(codePool, template.codingCount);
 
     if (mcq.length < template.mcqCount || fill.length < template.fillBlankCount || code.length < template.codingCount) {
-      throw new Error(`Question bank for ${template.skillName} does not satisfy the configured blueprint`);
+      throw new Error(`Question bank for ${template.skillName} does not satisfy the configured blueprint (MCQ: ${mcq.length}/${template.mcqCount}, Fill: ${fill.length}/${template.fillBlankCount}, Code: ${code.length}/${template.codingCount})`);
     }
 
     return shuffle([...mcq, ...fill, ...code]);
@@ -993,6 +1316,233 @@ export class ExamService {
       passPercentage: session.passPercentage,
       instructions: buildInstructions(skillType, session.skillName, codingLanguage),
       questions
+    };
+  }
+
+  private static async issueCertificate(userId: string, attemptId: string) {
+    const db = getDb();
+    const [attempt] = await db.select().from(userExams).where(eq(userExams.id, attemptId)).limit(1);
+    if (!attempt || attempt.status !== 'PASS') {
+      throw new Error('Valid passed attempt required for certificate issuance');
+    }
+
+    const [existing] = await db.select().from(issuedCertificates).where(eq(issuedCertificates.examAttemptId, attemptId)).limit(1);
+    if (existing) {
+      return existing;
+    }
+
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const certificateHash = crypto.createHash('sha256').update(`${userId}-${attemptId}-${Date.now()}`).digest('hex');
+
+    const [issued] = await db.insert(issuedCertificates).values({
+      userId,
+      examAttemptId: attemptId,
+      skillName: attempt.skillName,
+      certificateHash,
+      score: attempt.score,
+      percentage: attempt.percentage,
+      issuedAt: new Date(),
+      metadata: {
+        userName: (user as any)?.name || 'Candidate',
+        userEmail: user?.email,
+        attemptNumber: attempt.attemptNumber,
+        skillType: (attempt.evaluationJson as any)?.skillType
+      }
+    }).returning();
+
+    return issued;
+  }
+
+  static async getCertificate(attemptId: string, userId: string) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+    const [cert] = await db.select().from(issuedCertificates).where(and(
+      eq(issuedCertificates.examAttemptId, attemptId),
+      eq(issuedCertificates.userId, userId)
+    )).limit(1);
+
+    if (!cert) {
+      throw new Error('Certificate not found');
+    }
+
+    return cert;
+  }
+
+  static async verifyCertificate(hash: string) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+    const [cert] = await db.select().from(issuedCertificates).where(eq(issuedCertificates.certificateHash, hash)).limit(1);
+    if (!cert) {
+      throw new Error('Invalid or expired certificate');
+    }
+
+    return {
+      isValid: true,
+      issuedTo: (cert.metadata as any)?.userName,
+      skill: cert.skillName,
+      issuedAt: cert.issuedAt,
+      percentage: cert.percentage
+    };
+  }
+
+  static async logProctoringEvent(userId: string, sessionId: string, event: string, metadata?: Record<string, unknown>) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+    const [session] = await db.select().from(userExams).where(and(
+      eq(userExams.id, sessionId),
+      eq(userExams.userId, userId)
+    )).limit(1);
+
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    if (session.status !== 'IN_PROGRESS') {
+      throw new Error('Cannot log events for a completed session');
+    }
+
+    const currentLogs = ((session as any).proctoringLogsJson as any[]) || [];
+    const newLog = {
+      event,
+      timestamp: new Date().toISOString(),
+      metadata
+    };
+
+    await db.update(userExams)
+      .set({
+        proctoringLogsJson: [...currentLogs, newLog]
+      } as any)
+      .where(eq(userExams.id, sessionId));
+
+    return { success: true };
+  }
+
+  static async getAuditTrail(attemptId: string) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+    const [attempt] = await db.select().from(userExams).where(eq(userExams.id, attemptId)).limit(1);
+
+    if (!attempt) {
+      throw new Error('Attempt not found');
+    }
+
+    return {
+      id: attempt.id,
+      skillName: attempt.skillName,
+      status: attempt.status,
+      startedAt: attempt.startedAt,
+      submittedAt: attempt.submittedAt,
+      logs: (attempt as any).proctoringLogsJson,
+      summary: {
+        score: attempt.score,
+        percentage: attempt.percentage,
+        tabSwitches: ((attempt as any).proctoringLogsJson as any[]).filter(l => l.event === 'TAB_SWITCH').length,
+        fullscreenViolations: ((attempt as any).proctoringLogsJson as any[]).filter(l => l.event === 'FULLSCREEN_EXIT').length
+      }
+    };
+  }
+  static async assignExam(adminId: string, payload: { examId: string; userId?: string; teamId?: string; organizationId?: string; deadlineAt?: string; priority?: string }) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+
+    // Validate target
+    if (!payload.userId && !payload.teamId && !payload.organizationId) {
+      throw new Error('At least one assignment target (user, team, or organization) is required');
+    }
+
+    const [assignment] = await db.insert(examAssignments).values({
+      examId: payload.examId,
+      userId: payload.userId || null,
+      teamId: payload.teamId || null,
+      organizationId: payload.organizationId || null,
+      assignedBy: adminId,
+      deadlineAt: payload.deadlineAt ? new Date(payload.deadlineAt) : null,
+      priority: payload.priority || 'MEDIUM'
+    }).returning();
+
+    return assignment;
+  }
+
+  static async listUserAssignments(userId: string) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+
+    // Fetch assignments for this user specifically, or their teams, or their organizations
+    // Note: This logic assumes we can join with teams and organization members
+    // For now, let's just fetch direct user assignments and organization assignments
+    const assignments = await db.select({
+      id: examAssignments.id,
+      examId: examAssignments.examId,
+      status: examAssignments.status,
+      priority: examAssignments.priority,
+      deadlineAt: examAssignments.deadlineAt,
+      skillName: skillExams.skillName,
+      description: skillExams.description
+    })
+      .from(examAssignments)
+      .innerJoin(skillExams, eq(examAssignments.examId, skillExams.id))
+      .where(and(
+        eq(examAssignments.userId, userId),
+        eq(examAssignments.status, 'PENDING')
+      ))
+      .orderBy(desc(examAssignments.createdAt));
+
+    return assignments;
+  }
+
+  static async getOrganizationOverview(orgId: string) {
+    await this.ensureSchemaCompatibility();
+    const db = getDb();
+
+    // 1. Total team members
+    const members = await db.select().from(organizationMembers).where(eq(organizationMembers.organizationId, orgId));
+
+    // 2. Total exams taken by these members
+    const attempts = await db.select({
+      id: userExams.id,
+      userId: userExams.userId,
+      skillName: userExams.skillName,
+      score: userExams.percentage,
+      status: userExams.status,
+      createdAt: userExams.createdAt
+    })
+      .from(userExams)
+      .where(eq(userExams.organizationId, orgId))
+      .orderBy(desc(userExams.createdAt));
+
+    // 3. Aggregate performance
+    const totalAttempts = attempts.length;
+    const passedAttempts = attempts.filter(a => a.status === 'PASS').length;
+    const avgScore = totalAttempts > 0
+      ? Math.round(attempts.reduce((acc, a) => acc + a.score, 0) / totalAttempts)
+      : 0;
+
+    // 4. Skills distribution
+    const skillMap = new Map<string, { count: number; avg: number; passRate: number }>();
+    attempts.forEach(a => {
+      const stats = skillMap.get(a.skillName) || { count: 0, avg: 0, passRate: 0 };
+      stats.count += 1;
+      stats.avg += a.score;
+      if (a.status === 'PASS') stats.passRate += 1;
+      skillMap.set(a.skillName, stats);
+    });
+
+    const skillStats = Array.from(skillMap.entries()).map(([name, stats]) => ({
+      name,
+      count: stats.count,
+      avgScore: Math.round(stats.avg / stats.count),
+      passRate: Math.round((stats.passRate / stats.count) * 100)
+    }));
+
+    return {
+      summary: {
+        totalMembers: members.length,
+        totalAttempts,
+        passRate: totalAttempts > 0 ? Math.round((passedAttempts / totalAttempts) * 100) : 0,
+        avgScore
+      },
+      skillStats,
+      recentAttempts: attempts.slice(0, 10)
     };
   }
 
