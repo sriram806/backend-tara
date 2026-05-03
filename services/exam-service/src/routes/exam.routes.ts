@@ -228,6 +228,20 @@ export const examRoutes: FastifyPluginAsync = async (app) => {
     return replyOk(reply, result);
   });
 
+  app.get('/user/skill-stats', { preHandler: userAuthMiddleware }, async (request, reply) => {
+    const userId = request.userContext?.userId;
+    if (!userId) return reply.code(401).send({ success: false, error: 'Unauthorized' });
+    const result = await ExamService.getUserSkillStats(userId);
+    return replyOk(reply, result);
+  });
+
+  app.get('/dashboard/insights', { preHandler: userAuthMiddleware }, async (request, reply) => {
+    const userId = request.userContext?.userId;
+    if (!userId) return reply.code(401).send({ success: false, error: 'Unauthorized' });
+    const result = await ExamService.getDashboardInsights(userId);
+    return replyOk(reply, result);
+  });
+
   app.get('/admin/org/:orgId/overview', { preHandler: adminAuthMiddleware }, async (request, reply) => {
     const orgId = z.string().uuid().parse((request.params as { orgId?: string }).orgId);
     const result = await ExamService.getOrganizationOverview(orgId);
