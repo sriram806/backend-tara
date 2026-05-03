@@ -10,5 +10,4 @@ __pycache__/
 *.pyc
 .vscode/
 /blueprints/
-/docs/
-/tests/
+/docs/

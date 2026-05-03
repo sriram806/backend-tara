@@ -1,0 +1,496 @@
+{
+  "postmanSeed": {
+    "baseUrls": {
+      "gateway": "http://localhost:4000",
+      "auth": "http://localhost:4001",
+      "user": "http://localhost:4002",
+      "billing": "http://localhost:4010",
+      "notification": "http://localhost:4012",
+      "interview": "http://localhost:4013",
+      "ai": "http://localhost:8000"
+    },
+    "defaultHeaders": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "services": {
+      "auth-service": [
+        { "name": "health", "method": "GET", "url": "http://localhost:4001/health", "body": null },
+        {
+          "name": "register",
+          "method": "POST",
+          "url": "http://localhost:4001/auth/register",
+          "body": { "email": "day20.user@example.com", "password": "Day20@Pass1234", "fullName": "Day Twenty User" }
+        },
+        {
+          "name": "login",
+          "method": "POST",
+          "url": "http://localhost:4001/auth/login",
+          "body": { "email": "smoke.verified@example.com", "password": "Valid@Pass123" }
+        },
+        {
+          "name": "refresh-token",
+          "method": "POST",
+          "url": "http://localhost:4001/auth/refresh-token",
+          "body": { "refreshToken": "{{refreshToken}}" }
+        },
+        {
+          "name": "logout",
+          "method": "DELETE",
+          "url": "http://localhost:4001/auth/logout",
+          "body": { "refreshToken": "{{refreshToken}}" }
+        },
+        {
+          "name": "send-verify-otp",
+          "method": "POST",
+          "url": "http://localhost:4001/auth/send-verify-otp",
+          "body": { "email": "day20.user@example.com" }
+        },
+        {
+          "name": "verify-email",
+          "method": "POST",
+          "url": "http://localhost:4001/auth/verify-email",
+          "body": { "email": "day20.user@example.com", "otp": "123456" }
+        },
+        {
+          "name": "forgot-password",
+          "method": "POST",
+          "url": "http://localhost:4001/auth/forgot-password",
+          "body": { "email": "day20.user@example.com" }
+        },
+        {
+          "name": "reset-password",
+          "method": "POST",
+          "url": "http://localhost:4001/auth/reset-password",
+          "body": { "email": "day20.user@example.com", "otp": "123456", "newPassword": "New@Pass12345" }
+        }
+      ],
+      "gateway": [
+        { "name": "health", "method": "GET", "url": "http://localhost:4000/health", "body": null },
+        {
+          "name": "proxy-catch-all",
+          "method": "ALL",
+          "url": "http://localhost:4000/api/*",
+          "body": { "example": "send upstream payload based on proxied endpoint" }
+        }
+      ],
+      "billing-service": [
+        { "name": "health", "method": "GET", "url": "http://localhost:4010/health", "body": null },
+        {
+          "name": "webhook",
+          "method": "POST",
+          "url": "http://localhost:4010/billing/webhook",
+          "body": { "event": "payment.captured", "payload": { "id": "evt_123", "orderId": "order_123" } }
+        },
+        {
+          "name": "create-order",
+          "method": "POST",
+          "url": "http://localhost:4010/billing/orders",
+          "body": { "planId": "pro_monthly", "amount": 499, "currency": "INR" }
+        },
+        {
+          "name": "subscribe",
+          "method": "POST",
+          "url": "http://localhost:4010/billing/subscribe",
+          "body": { "planId": "pro_monthly", "billingCycle": "monthly", "paymentMethod": "razorpay" }
+        },
+        {
+          "name": "verify-payment",
+          "method": "POST",
+          "url": "http://localhost:4010/billing/verify",
+          "body": { "orderId": "order_123", "paymentId": "pay_123", "signature": "dummy_signature" }
+        },
+        { "name": "get-subscription", "method": "GET", "url": "http://localhost:4010/billing/subscription", "body": null },
+        { "name": "get-invoices", "method": "GET", "url": "http://localhost:4010/billing/invoices", "body": null },
+        { "name": "payment-status", "method": "GET", "url": "http://localhost:4010/billing/payments/order_123/status", "body": null },
+        {
+          "name": "consume-quota",
+          "method": "POST",
+          "url": "http://localhost:4010/billing/quota/consume",
+          "body": { "feature": "resume-analysis", "units": 1 }
+        },
+        { "name": "quota-usage", "method": "GET", "url": "http://localhost:4010/billing/quota/usage", "body": null }
+      ],
+      "notification-service": [
+        { "name": "health", "method": "GET", "url": "http://localhost:4012/health", "body": null },
+        {
+          "name": "emit",
+          "method": "POST",
+          "url": "http://localhost:4012/emit",
+          "body": { "userId": "user_123", "type": "info", "title": "Welcome", "message": "Notification test message" }
+        },
+        { "name": "list-notifications", "method": "GET", "url": "http://localhost:4012/notifications", "body": null },
+        { "name": "mark-read", "method": "PATCH", "url": "http://localhost:4012/notifications/notif_123/read", "body": {} },
+        { "name": "achievements", "method": "GET", "url": "http://localhost:4012/achievements", "body": null },
+        { "name": "leaderboard", "method": "GET", "url": "http://localhost:4012/leaderboard", "body": null }
+      ],
+      "interview-service": [
+        { "name": "health", "method": "GET", "url": "http://localhost:4013/health", "body": null },
+        {
+          "name": "create-session",
+          "method": "POST",
+          "url": "http://localhost:4013/interview/sessions",
+          "body": { "userId": "day20-user", "role": "Backend Engineer", "type": "technical" }
+        },
+        {
+          "name": "get-session",
+          "method": "GET",
+          "url": "http://localhost:4013/interview/sessions/session_123",
+          "body": null
+        }
+      ],
+      "ai-service": [
+        { "name": "health", "method": "GET", "url": "http://localhost:8000/health", "body": null },
+        { "name": "ready", "method": "GET", "url": "http://localhost:8000/ready", "body": null },
+
+        {
+          "name": "career-analyze",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/career?forceRefresh=false",
+          "body": {
+            "resumeText": "Backend engineer with 3+ years exp in Fastify, PostgreSQL, Redis.",
+            "resumeData": {},
+            "targetRole": "Backend Engineer",
+            "userId": "user_123",
+            "githubScore": 72,
+            "quizScore": 78
+          }
+        },
+        { "name": "career-latest", "method": "GET", "url": "http://localhost:8000/ai/career/latest?userId=user_123", "body": null },
+
+        {
+          "name": "resume-analyze",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/resume/analyze",
+          "body": { "userId": "user_123", "targetRole": "Backend Engineer", "jobDescription": "Node.js backend role" }
+        },
+        {
+          "name": "resume-analyze-structured",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/resume/analyze-structured",
+          "body": {
+            "userId": "user_123",
+            "targetRole": "Backend Engineer",
+            "jobDescription": "Node.js backend role",
+            "resume": {
+              "title": "Backend Engineer",
+              "summary": "Built scalable APIs",
+              "skills": ["Node.js", "Fastify", "PostgreSQL"]
+            }
+          }
+        },
+        { "name": "resume-latest", "method": "GET", "url": "http://localhost:8000/ai/resume/latest?userId=user_123", "body": null },
+        {
+          "name": "resume-rewrite",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/resume/rewrite",
+          "body": {
+            "userId": "user_123",
+            "sectionName": "summary",
+            "sectionText": "Built APIs",
+            "role": "Backend Engineer"
+          }
+        },
+
+        {
+          "name": "roadmap-generate",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/roadmap/generate",
+          "body": {
+            "userId": "user_123",
+            "targetRole": "Backend Engineer",
+            "skillGaps": ["System Design", "Redis"],
+            "durationDays": 90,
+            "adaptiveContext": {},
+            "forceRefresh": false
+          }
+        },
+        { "name": "roadmap-current", "method": "GET", "url": "http://localhost:8000/ai/roadmap/current?userId=user_123", "body": null },
+        {
+          "name": "roadmap-adapt",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/roadmap/adapt",
+          "body": {
+            "userId": "user_123",
+            "targetRole": "Backend Engineer",
+            "skillGaps": ["System Design"],
+            "missedDays": 3,
+            "irrelevantTasks": ["Intro to Git"],
+            "baseRoadmap": []
+          }
+        },
+
+        {
+          "name": "jobs-match",
+          "method": "GET",
+          "url": "http://localhost:8000/ai/jobs/match?userId=user_123&targetRole=Backend%20Engineer&topN=5&forceRefresh=false",
+          "body": null
+        },
+
+        {
+          "name": "interview-questions",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/interview/questions",
+          "body": { "role": "Backend Engineer", "level": "mid", "topic": "Node.js" }
+        },
+        {
+          "name": "interview-stream-response",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/interview/stream-response",
+          "body": { "sessionId": "session_123", "message": "Explain event loop", "context": [] }
+        },
+        {
+          "name": "interview-evaluate",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/interview/evaluate",
+          "body": { "question": "What is Redis?", "answer": "In-memory data store", "role": "Backend Engineer" }
+        },
+
+        {
+          "name": "github-analyze",
+          "method": "POST",
+          "url": "http://localhost:8000/ai/github/analyze",
+          "body": {
+            "userId": "user_123",
+            "githubUsername": "octocat",
+            "metrics": { "repos": 12, "stars": 20, "commits90d": 120 },
+            "normalizedData": {}
+          }
+        }
+      ],
+      "user-service": [
+        { "name": "health-root", "method": "GET", "url": "http://localhost:4002/", "body": null },
+        { "name": "health-ready", "method": "GET", "url": "http://localhost:4002/ready", "body": null },
+
+        { "name": "user-me", "method": "GET", "url": "http://localhost:4002/users/me", "body": null },
+        {
+          "name": "user-update-me",
+          "method": "PATCH",
+          "url": "http://localhost:4002/users/me",
+          "body": { "fullName": "Day Twenty User", "avatarUrl": "https://example.com/avatar.png" }
+        },
+
+        {
+          "name": "resume-create-update",
+          "method": "POST",
+          "url": "http://localhost:4002/user/resume",
+          "body": {
+            "mode": "draft",
+            "resume": {
+              "title": "Senior Backend Engineer",
+              "summary": "Built scalable backend systems.",
+              "skills": [
+                { "name": "TypeScript", "category": "technical", "proficiency": "advanced" },
+                { "name": "Fastify", "category": "technical", "proficiency": "advanced" }
+              ]
+            }
+          }
+        },
+        { "name": "resume-get", "method": "GET", "url": "http://localhost:4002/user/resume", "body": null },
+        { "name": "resume-delete", "method": "DELETE", "url": "http://localhost:4002/user/resume", "body": {} },
+
+        {
+          "name": "onboarding-resume",
+          "method": "POST",
+          "url": "http://localhost:4002/onboarding/resume",
+          "body": {
+            "mode": "draft",
+            "resume": {
+              "title": "Backend Engineer",
+              "summary": "Microservices + cloud experience",
+              "skills": [{ "name": "Node.js", "category": "technical", "proficiency": "advanced" }]
+            }
+          }
+        },
+        {
+          "name": "onboarding-target-role",
+          "method": "POST",
+          "url": "http://localhost:4002/onboarding/target-role",
+          "body": {
+            "title": "Backend Engineer",
+            "level": "mid",
+            "industry": "SaaS",
+            "locationPreference": "Remote",
+            "keywords": ["node", "fastify", "postgres"]
+          }
+        },
+        { "name": "onboarding-status", "method": "GET", "url": "http://localhost:4002/onboarding/status", "body": null },
+
+        {
+          "name": "resume-analysis-start",
+          "method": "POST",
+          "url": "http://localhost:4002/ai/resume/analyze",
+          "body": { "targetRole": "Backend Engineer", "jobDescription": "Node.js role" }
+        },
+        { "name": "resume-analysis-job", "method": "GET", "url": "http://localhost:4002/ai/resume/analyze/run_123", "body": null },
+
+        {
+          "name": "career-analysis-start",
+          "method": "POST",
+          "url": "http://localhost:4002/ai/analysis/jobs",
+          "body": { "targetRole": "Backend Engineer", "forceRefresh": false }
+        },
+        { "name": "career-analysis-job", "method": "GET", "url": "http://localhost:4002/ai/analysis/jobs/job_123", "body": null },
+
+        {
+          "name": "roadmap-generate",
+          "method": "POST",
+          "url": "http://localhost:4002/ai/roadmap/generate",
+          "body": { "analysisRunId": "00000000-0000-0000-0000-000000000111", "targetRole": "Backend Engineer", "durationDays": 90 }
+        },
+        { "name": "roadmap-get", "method": "GET", "url": "http://localhost:4002/ai/roadmap/run_123", "body": null },
+        {
+          "name": "roadmap-job-start",
+          "method": "POST",
+          "url": "http://localhost:4002/ai/roadmap/jobs",
+          "body": { "analysisRunId": "run_123", "targetRole": "Backend Engineer", "durationDays": 90 }
+        },
+        { "name": "roadmap-job-status", "method": "GET", "url": "http://localhost:4002/ai/roadmap/jobs/job_123", "body": null },
+
+        {
+          "name": "job-match-start",
+          "method": "POST",
+          "url": "http://localhost:4002/ai/jobs/match",
+          "body": { "targetRole": "Backend Engineer", "location": "Remote", "experienceYears": 3 }
+        },
+        { "name": "job-match-status", "method": "GET", "url": "http://localhost:4002/ai/jobs/match/job_123", "body": null },
+
+        {
+          "name": "exam-start",
+          "method": "POST",
+          "url": "http://localhost:4002/exam/start",
+          "body": { "skillName": "Node.js", "difficultyLevel": 2, "timeLimitSeconds": 1200 }
+        },
+        {
+          "name": "exam-submit",
+          "method": "POST",
+          "url": "http://localhost:4002/exam/submit",
+          "body": {
+            "userExamId": "00000000-0000-0000-0000-000000000001",
+            "answers": [{ "questionId": "00000000-0000-0000-0000-000000000010", "answer": "Selected option B with explanation" }]
+          }
+        },
+        { "name": "exam-result", "method": "GET", "url": "http://localhost:4002/exam/result?userExamId=00000000-0000-0000-0000-000000000001", "body": null },
+        {
+          "name": "exam-retest",
+          "method": "POST",
+          "url": "http://localhost:4002/exam/retest",
+          "body": { "skillName": "Node.js", "difficultyLevel": 2, "timeLimitSeconds": 1200 }
+        },
+
+        {
+          "name": "org-create",
+          "method": "POST",
+          "url": "http://localhost:4002/org/create",
+          "body": { "name": "Think AI Org", "slug": "think-ai-org" }
+        },
+        {
+          "name": "org-invite",
+          "method": "POST",
+          "url": "http://localhost:4002/org/invite",
+          "body": { "email": "member@example.com", "role": "member" }
+        },
+        {
+          "name": "org-join",
+          "method": "POST",
+          "url": "http://localhost:4002/org/join",
+          "body": { "inviteCode": "INVITE123" }
+        },
+        { "name": "org-dashboard", "method": "GET", "url": "http://localhost:4002/org/dashboard", "body": null },
+        { "name": "org-members", "method": "GET", "url": "http://localhost:4002/org/members", "body": null },
+        { "name": "org-member", "method": "GET", "url": "http://localhost:4002/org/member/member_123", "body": null },
+        {
+          "name": "org-assignments-create",
+          "method": "POST",
+          "url": "http://localhost:4002/org/assignments",
+          "body": { "memberId": "member_123", "task": "Complete Node.js roadmap", "dueDate": "2026-05-01" }
+        },
+        { "name": "org-assignments-list", "method": "GET", "url": "http://localhost:4002/org/assignments", "body": null },
+
+        { "name": "profile-insights", "method": "GET", "url": "http://localhost:4002/user/profile/insights", "body": null },
+        {
+          "name": "profile-activity",
+          "method": "POST",
+          "url": "http://localhost:4002/user/activity",
+          "body": { "type": "roadmap_task_completed", "meta": { "taskId": "task_123" } }
+        },
+
+        { "name": "recommendations-list", "method": "GET", "url": "http://localhost:4002/user/recommendations?limit=5&refresh=false", "body": null },
+        {
+          "name": "recommendation-action",
+          "method": "POST",
+          "url": "http://localhost:4002/user/recommendations/rec_123/action",
+          "body": { "action": "clicked" }
+        },
+
+        { "name": "skills-progress", "method": "GET", "url": "http://localhost:4002/skills/progress", "body": null },
+
+        {
+          "name": "analytics-event",
+          "method": "POST",
+          "url": "http://localhost:4002/analytics/event",
+          "body": { "eventType": "page_view", "userId": "user_123", "metadata": { "page": "dashboard" } }
+        },
+        { "name": "analytics-user", "method": "GET", "url": "http://localhost:4002/analytics/user", "body": null },
+        { "name": "analytics-admin", "method": "GET", "url": "http://localhost:4002/analytics/admin", "body": null },
+
+        { "name": "experiments-variant", "method": "GET", "url": "http://localhost:4002/experiments/variant?experimentKey=onboarding-copy-v1", "body": null },
+        {
+          "name": "experiments-track",
+          "method": "POST",
+          "url": "http://localhost:4002/experiments/track",
+          "body": { "experimentKey": "onboarding-copy-v1", "event": "impression", "variant": "A" }
+        },
+        { "name": "experiments-list", "method": "GET", "url": "http://localhost:4002/experiments", "body": null },
+        { "name": "experiments-results", "method": "GET", "url": "http://localhost:4002/experiments/results", "body": null },
+        {
+          "name": "experiments-create",
+          "method": "POST",
+          "url": "http://localhost:4002/experiments",
+          "body": {
+            "key": "onboarding-copy-v2",
+            "name": "Onboarding Copy V2",
+            "variants": [{ "key": "A", "weight": 50 }, { "key": "B", "weight": 50 }]
+          }
+        },
+        {
+          "name": "experiments-update-status",
+          "method": "PATCH",
+          "url": "http://localhost:4002/experiments/exp_123/status",
+          "body": { "status": "active" }
+        },
+
+        { "name": "feature-flag-by-key", "method": "GET", "url": "http://localhost:4002/feature-flags/onboarding-ui-v2", "body": null },
+        { "name": "feature-flags-list", "method": "GET", "url": "http://localhost:4002/feature-flags", "body": null },
+        {
+          "name": "feature-flag-create",
+          "method": "POST",
+          "url": "http://localhost:4002/feature-flags",
+          "body": { "key": "onboarding-ui-v2", "description": "Enable new onboarding UI", "enabled": true }
+        },
+        {
+          "name": "feature-flag-update",
+          "method": "PUT",
+          "url": "http://localhost:4002/feature-flags/ff_123",
+          "body": { "description": "Updated description", "enabled": false }
+        },
+        {
+          "name": "feature-flag-add-override",
+          "method": "POST",
+          "url": "http://localhost:4002/feature-flags/ff_123/overrides",
+          "body": { "scope": "user", "targetId": "user_123", "enabled": true }
+        },
+        {
+          "name": "feature-flag-delete-override",
+          "method": "DELETE",
+          "url": "http://localhost:4002/feature-flags/ff_123/overrides/ovr_123",
+          "body": {}
+        }
+      ]
+    },
+    "summary": {
+      "apps": 7,
+      "apisListed": 98
+    }
+  }
+}
