@@ -28,6 +28,7 @@ export class ExamSchemaService {
         await db.execute(sql`ALTER TABLE IF EXISTS skill_exams ADD COLUMN IF NOT EXISTS fill_blank_count INTEGER NOT NULL DEFAULT 10`);
         await db.execute(sql`ALTER TABLE IF EXISTS skill_exams ADD COLUMN IF NOT EXISTS coding_count INTEGER NOT NULL DEFAULT 0`);
         await db.execute(sql`ALTER TABLE IF EXISTS skill_exams ADD COLUMN IF NOT EXISTS is_published BOOLEAN NOT NULL DEFAULT TRUE`);
+        await db.execute(sql`ALTER TABLE IF EXISTS skill_exams ADD COLUMN IF NOT EXISTS security_config JSONB NOT NULL DEFAULT '{"enforceFullscreen": false, "disableCopyPaste": true, "trackTabSwitches": true, "shuffleQuestions": true}'::jsonb`);
         await db.execute(sql`ALTER TABLE IF EXISTS skill_exams ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
         await db.execute(sql`CREATE INDEX IF NOT EXISTS skill_exams_org_idx ON skill_exams (organization_id)`);
         await db.execute(sql`CREATE INDEX IF NOT EXISTS skill_exams_skill_difficulty_idx ON skill_exams (skill_name, difficulty_level)`);
@@ -66,6 +67,7 @@ export class ExamSchemaService {
         await db.execute(sql`ALTER TABLE IF EXISTS user_exams ADD COLUMN IF NOT EXISTS answers_json JSONB NOT NULL DEFAULT '{}'::jsonb`);
         await db.execute(sql`ALTER TABLE IF EXISTS user_exams ADD COLUMN IF NOT EXISTS question_snapshot_json JSONB NOT NULL DEFAULT '[]'::jsonb`);
         await db.execute(sql`ALTER TABLE IF EXISTS user_exams ADD COLUMN IF NOT EXISTS evaluation_json JSONB NOT NULL DEFAULT '{}'::jsonb`);
+        await db.execute(sql`ALTER TABLE IF EXISTS user_exams ADD COLUMN IF NOT EXISTS proctoring_logs_json JSONB NOT NULL DEFAULT '[]'::jsonb`);
         await db.execute(sql`ALTER TABLE IF EXISTS user_exams ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
         await db.execute(sql`ALTER TABLE IF EXISTS user_exams ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
         await db.execute(sql`ALTER TABLE IF EXISTS user_exams ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ`);
