@@ -115,8 +115,24 @@ export class ExamSchemaService {
           CREATE INDEX IF NOT EXISTS skill_progress_updated_at_idx ON skill_progress (updated_at);
         `);
 
-        // 6. Data Normalization
-        const tables = ['skill_exams', 'exam_questions', 'user_exams', 'skill_progress'];
+        // 6. Skill Requests Table
+        await db.execute(sql`
+          CREATE TABLE IF NOT EXISTS skill_requests (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            skill_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            request_count INTEGER NOT NULL DEFAULT 1,
+            last_requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE INDEX IF NOT EXISTS skill_requests_name_idx ON skill_requests (skill_name);
+          CREATE INDEX IF NOT EXISTS skill_requests_status_idx ON skill_requests (status);
+        `);
+
+        // 7. Data Normalization
+        const tables = ['skill_exams', 'exam_questions', 'user_exams', 'skill_progress', 'skill_requests'];
         for (const table of tables) {
           await db.execute(sql`
             DO $$ BEGIN
