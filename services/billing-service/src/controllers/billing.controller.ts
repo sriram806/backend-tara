@@ -22,6 +22,7 @@ export class BillingController {
       const result = await this.billingService.subscribe(userId, dto, this.getIdempotencyKey(request));
       return sendSuccess(reply, result, 201);
     } catch (error) {
+      request.log.error(error, 'Create order failed');
       return sendError(reply, 400, 'BILLING_ORDER_CREATE_FAILED', error instanceof Error ? error.message : 'Create order failed');
     }
   };
@@ -35,6 +36,7 @@ export class BillingController {
       const result = await this.billingService.subscribe(userId, dto, this.getIdempotencyKey(request));
       return sendSuccess(reply, result, 201);
     } catch (error) {
+      request.log.error(error, 'Subscribe failed');
       return sendError(reply, 400, 'BILLING_SUBSCRIBE_FAILED', error instanceof Error ? error.message : 'Subscribe failed');
     }
   };
@@ -48,6 +50,7 @@ export class BillingController {
       const result = await this.billingService.verify(userId, dto);
       return sendSuccess(reply, result);
     } catch (error) {
+      request.log.error(error, 'Verify failed');
       return sendError(reply, 400, 'BILLING_VERIFY_FAILED', error instanceof Error ? error.message : 'Verify failed');
     }
   };

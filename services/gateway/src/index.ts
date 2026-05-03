@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import Fastify from 'fastify';
+import { z } from 'zod';
 import { commonServiceEnvSchema, loadEnv } from '@thinkai/config';
 import { GatewayController } from './controllers/gateway.controller';
 import { gatewayAuthMiddleware } from './middleware/auth.middleware';
@@ -9,7 +10,16 @@ import { healthRoutes } from './routes/health.routes';
 import { proxyRoutes } from './routes/proxy.routes';
 import { GatewayService } from './services/gateway.service';
 
-const env = loadEnv(commonServiceEnvSchema);
+
+const env = loadEnv(commonServiceEnvSchema.merge(z.object({
+  EXAM_SERVICE_URL: z.string().url().default('http://localhost:4111'),
+  AUTH_SERVICE_URL: z.string().url().default('http://localhost:4101'),
+  AI_SERVICE_URL: z.string().url().default('http://localhost:8000'),
+  BILLING_SERVICE_URL: z.string().url().default('http://localhost:4102'),
+  INTERVIEW_SERVICE_URL: z.string().url().default('http://localhost:4103'),
+  NOTIFICATION_SERVICE_URL: z.string().url().default('http://localhost:4104'),
+  USER_SERVICE_URL: z.string().url().default('http://localhost:4105')
+})));
 
 const app = Fastify({
   logger: {
@@ -19,7 +29,15 @@ const app = Fastify({
   genReqId: () => crypto.randomUUID()
 });
 
-const gatewayController = new GatewayController(new GatewayService());
+const gatewayController = new GatewayController(new GatewayService({
+  examServiceUrl: env.EXAM_SERVICE_URL,
+  authServiceUrl: env.AUTH_SERVICE_URL,
+  aiServiceUrl: env.AI_SERVICE_URL,
+  billingServiceUrl: env.BILLING_SERVICE_URL,
+  interviewServiceUrl: env.INTERVIEW_SERVICE_URL,
+  notificationServiceUrl: env.NOTIFICATION_SERVICE_URL,
+  userServiceUrl: env.USER_SERVICE_URL
+}));
 
 void registerCorePlugins(app);
 

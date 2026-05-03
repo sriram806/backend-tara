@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
 import { userAuthMiddleware } from '../middleware/auth.middleware';
-import { SkillAssessmentService } from '../services/skill-assessment.service';
+import { UserSkillService } from '../services/user-skill.service';
 import { replyOk } from '../utils/response';
 
 export const skillsRoutes: FastifyPluginAsync = async (app) => {
@@ -11,7 +11,7 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(401).send({ success: false, error: 'Unauthorized' });
       }
 
-      const result = await SkillAssessmentService.getSkillsProgress(userId);
+      const result = await UserSkillService.getSkillsProgress(userId);
       return replyOk(reply, result);
     } catch (error: any) {
       app.log.error(error);

@@ -8,8 +8,10 @@ import { enqueueNotification } from './queue.service';
 type NotificationPayload = {
   userId: string;
   type: 'email' | 'in_app';
+  category?: 'info' | 'success' | 'warning' | 'error' | 'system' | 'promotion';
   title: string;
   message: string;
+  actionUrl?: string;
   eventType?: string;
   metadata?: Record<string, unknown>;
 };
@@ -27,8 +29,10 @@ export class NotificationDispatcherService {
     await db.insert(notifications).values({
       userId: payload.userId,
       type: payload.type,
+      category: payload.category ?? 'info',
       title: payload.title,
       message: payload.message,
+      actionUrl: payload.actionUrl,
       read: false
     });
 
@@ -48,7 +52,9 @@ export class NotificationDispatcherService {
       userId: payload.userId,
       title: payload.title,
       message: payload.message,
-      type: payload.type
+      type: payload.type,
+      category: payload.category ?? 'info',
+      actionUrl: payload.actionUrl
     }));
 
     await this.processAchievements(payload);

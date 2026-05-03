@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import { and, desc, eq, gt, isNull, lt } from 'drizzle-orm';
-import { getDb, isDatabaseConfigured, otpVerifications, refreshTokens, userProfiles, users } from '@thinkai/db';
+import { getDb, isDatabaseConfigured, otpVerifications, refreshTokens, userLoginHistory, userProfiles, users } from '@thinkai/db';
 
-export type UserRole = 'guest' | 'free' | 'pro' | 'admin';
+export type UserRole = 'guest' | 'user' | 'support' | 'moderator' | 'admin';
 export type OtpType = 'VERIFY_EMAIL' | 'RESET_PASSWORD';
 
 export type UserRecord = {
@@ -73,7 +73,7 @@ export class AuthStore {
         id: row[0].id,
         email: row[0].email,
         passwordHash: row[0].passwordHash,
-        role: row[0].role,
+        role: row[0].role as UserRole,
         status: row[0].status,
         emailVerified: row[0].emailVerified,
         createdAt: row[0].createdAt
@@ -93,7 +93,7 @@ export class AuthStore {
         id: row[0].id,
         email: row[0].email,
         passwordHash: row[0].passwordHash,
-        role: row[0].role,
+        role: row[0].role as UserRole,
         status: row[0].status,
         emailVerified: row[0].emailVerified,
         createdAt: row[0].createdAt
@@ -112,7 +112,7 @@ export class AuthStore {
         .values({
           email: input.email,
           passwordHash: input.passwordHash,
-          role: 'free',
+          role: 'user' as any,
           status: 'active',
           emailVerified: false,
           authProvider: 'local'
@@ -129,7 +129,7 @@ export class AuthStore {
         id: newUser.id,
         email: newUser.email,
         passwordHash: newUser.passwordHash,
-        role: newUser.role,
+        role: newUser.role as UserRole,
         status: newUser.status,
         emailVerified: newUser.emailVerified,
         createdAt: newUser.createdAt
@@ -140,7 +140,7 @@ export class AuthStore {
       id: crypto.randomUUID(),
       email: input.email,
       passwordHash: input.passwordHash,
-      role: 'free',
+      role: 'user',
       status: 'active',
       emailVerified: false,
       createdAt: new Date()
@@ -291,6 +291,100 @@ export class AuthStore {
       if (entry.userId === userId && !entry.revokedAt) {
         entry.revokedAt = new Date();
       }
+    }
+  }
+
+  // ─── Account Lockout ──────────────────────────────────────────────────────
+
+  /**
+   * Increments failed login attempts. If the count reaches MAX_LOGIN_ATTEMPTS
+   * (default 5), sets lockUntil = now + LOCKOUT_DURATION_MINUTES (default 720).
+   */
+  async incrementFailedAttempts(userId: string): Promise<void> {
+    const maxAttempts = parseInt(process.env.MAX_LOGIN_ATTEMPTS ?? '5', 10);
+    const lockoutMinutes = parseInt(process.env.LOCKOUT_DURATION_MINUTES ?? '720', 10);
+
+    if (this.db) {
+      const [user] = await this.db
+        .select({ failedLoginAttempts: users.failedLoginAttempts })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      const newCount = (user?.failedLoginAttempts ?? 0) + 1;
+      const lockUntil = newCount >= maxAttempts
+        ? new Date(Date.now() + lockoutMinutes * 60 * 1000)
+        : undefined;
+
+      await this.db
+        .update(users)
+        .set({
+          failedLoginAttempts: newCount,
+          ...(lockUntil ? { lockUntil } : {}),
+          updatedAt: new Date()
+        })
+        .where(eq(users.id, userId));
+      return;
+    }
+
+    // In-memory fallback
+    const u = this.memoryUsersById.get(userId);
+    if (u) {
+      const newCount = ((u as any).failedLoginAttempts ?? 0) + 1;
+      (u as any).failedLoginAttempts = newCount;
+      if (newCount >= maxAttempts) {
+        (u as any).lockUntil = new Date(Date.now() + lockoutMinutes * 60 * 1000);
+      }
+    }
+  }
+
+
+
+  /**
+   * Clears failed attempts, removes lockUntil, and stamps lastLogin = now.
+   */
+  async resetFailedAttempts(userId: string): Promise<void> {
+    if (this.db) {
+      await this.db
+        .update(users)
+        .set({
+          failedLoginAttempts: 0,
+          lockUntil: null,
+          lastLogin: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(users.id, userId));
+      return;
+    }
+
+    const u = this.memoryUsersById.get(userId);
+    if (u) {
+      (u as any).failedLoginAttempts = 0;
+      (u as any).lockUntil = null;
+      (u as any).lastLogin = new Date();
+    }
+  }
+
+  // ─── Login History ────────────────────────────────────────────────────────
+
+  async recordLoginHistory(entry: {
+    userId: string;
+    ipAddress?: string;
+    userAgent?: string;
+    success: boolean;
+    failureReason?: string;
+  }): Promise<void> {
+    if (!this.db) return; // no-op in memory mode
+    try {
+      await this.db.insert(userLoginHistory).values({
+        userId: entry.userId,
+        ipAddress: entry.ipAddress,
+        userAgent: entry.userAgent,
+        success: entry.success,
+        failureReason: entry.failureReason
+      });
+    } catch {
+      // Login history is best-effort — never block auth flow
     }
   }
 

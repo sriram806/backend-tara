@@ -1,13 +1,12 @@
 import crypto from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
-import { getDb, invoices, paymentTransactions, subscriptions, webhookEvents } from '@thinkai/db';
+import { getDb, invoices, paymentTransactions, subscriptions, users, webhookEvents } from '@thinkai/db';
 import { getPlanConfig, PlanName } from '../utils/plans';
 import { QuotaConsumeDto, SubscribeDto, VerifyDto } from '../schemas/billing.schema';
 import { RazorpayService } from './razorpay.service';
 import { redisClient } from './redis.service';
 
 const GRACE_DAYS = 3;
-const FREE_TRIAL_DAYS = 7;
 const MAX_WEBHOOK_RETRIES = 3;
 
 function addDays(date: Date, days: number) {
@@ -46,26 +45,11 @@ function normalizeIdempotencyKey(value?: string) {
 }
 
 export class BillingService {
-  constructor(private readonly razorpayService: RazorpayService) {}
+  constructor(private readonly razorpayService: RazorpayService) { }
 
   async subscribe(userId: string, dto: SubscribeDto, requestIdempotencyKey?: string) {
     const planConfig = getPlanConfig(dto.plan);
     const idempotencyKey = normalizeIdempotencyKey(requestIdempotencyKey ?? dto.idempotencyKey);
-
-    if (dto.plan === 'FREE') {
-      const subscription = await this.activateSubscription({
-        userId,
-        plan: 'FREE',
-        provider: 'none',
-        periodStart: new Date(),
-        periodEnd: addDays(new Date(), FREE_TRIAL_DAYS)
-      });
-
-      return {
-        subscription,
-        checkout: null
-      };
-    }
 
     if (idempotencyKey) {
       const existing = await this.findTransactionByUserAndIdempotency(userId, idempotencyKey);
@@ -89,7 +73,7 @@ export class BillingService {
       }
     }
 
-    const receipt = `thinkai_${userId.slice(0, 8)}_${Date.now()}`;
+    const receipt = `nova_${userId.slice(0, 8)}_${Date.now()}`;
     const order = await this.razorpayService.createOrder({
       userId,
       plan: dto.plan,
@@ -98,7 +82,7 @@ export class BillingService {
 
     const [transaction] = await getDb().insert(paymentTransactions).values({
       userId,
-      plan: dto.plan,
+      plan: dto.plan as any,
       provider: 'razorpay',
       providerOrderId: order.id,
       idempotencyKey,
@@ -249,9 +233,16 @@ export class BillingService {
 
       if (eventName === 'subscription.cancelled') {
         const subscriptionId = String(entity.id ?? '');
-        await getDb().update(subscriptions)
+        const [sub] = await getDb().update(subscriptions)
           .set({ status: 'cancelled', updatedAt: new Date() })
-          .where(eq(subscriptions.razorpaySubscriptionId, subscriptionId));
+          .where(eq(subscriptions.razorpaySubscriptionId, subscriptionId))
+          .returning({ userId: subscriptions.userId });
+
+        if (sub?.userId) {
+          await getDb().update(users)
+            .set({ plan: null, updatedAt: new Date() })
+            .where(eq(users.id, sub.userId));
+        }
       }
 
       await getDb().update(webhookEvents)
@@ -292,8 +283,14 @@ export class BillingService {
     const subscription = rows[0];
 
     if (!subscription) {
+      const [user] = await getDb().select({ plan: users.plan }).from(users).where(eq(users.id, userId)).limit(1);
+      if (user && user?.plan) {
+        await getDb().update(users)
+          .set({ plan: null, updatedAt: new Date() })
+          .where(eq(users.id, userId));
+      }
       return {
-        plan: 'FREE' as PlanName,
+        plan: 'NONE' as PlanName, // Fallback to NONE instead of LITE
         status: 'expired',
         isInGracePeriod: false,
         active: false
@@ -304,6 +301,19 @@ export class BillingService {
     const isExpired = new Date(subscription.endDate) <= now;
     const isInGracePeriod = isExpired && graceEndDate > now;
 
+    const active = subscription.status === 'active' && (!isExpired || isInGracePeriod);
+
+    // Sync users.plan flag if it mismatch with active status
+    const [user] = await getDb().select({ plan: users.plan }).from(users).where(eq(users.id, userId)).limit(1);
+    if (user) {
+      const expectedPlan = active ? (subscription.plan as any) : null;
+      if (user.plan !== expectedPlan) {
+        await getDb().update(users)
+          .set({ plan: expectedPlan, updatedAt: new Date() })
+          .where(eq(users.id, userId));
+      }
+    }
+
     return {
       id: String(subscription.id),
       plan: subscription.plan as PlanName,
@@ -312,7 +322,7 @@ export class BillingService {
       currentPeriodStart: subscription.startDate,
       currentPeriodEnd: subscription.endDate,
       isInGracePeriod,
-      active: subscription.status === 'active' && (!isExpired || isInGracePeriod)
+      active
     };
   }
 
@@ -346,7 +356,7 @@ export class BillingService {
 
   async consumeQuota(userId: string, dto: QuotaConsumeDto) {
     const subscription = await this.getSubscription(userId);
-    const plan = (subscription.plan ?? 'FREE') as PlanName;
+    const plan = (subscription.plan ?? 'NONE') as PlanName;
     const config = getPlanConfig(plan);
 
     if (!subscription.active) {
@@ -422,7 +432,7 @@ export class BillingService {
         currency: String(order.currency ?? transaction.currency)
       },
       transactionId: String(transaction.id),
-      keyId: process.env.RAZORPAY_KEY_ID,
+      keyId: this.razorpayService.getKeyId(),
       plan: transaction.plan,
       idempotent: true
     };
@@ -504,10 +514,10 @@ export class BillingService {
 
     return this.activateSubscription({
       userId: input.userId,
-      plan: transaction.plan,
+      plan: transaction.plan as PlanName,
       provider: 'razorpay',
       periodStart: new Date(),
-      periodEnd: addMonths(new Date(), 1),
+      periodEnd: addMonths(new Date(), 3),
       providerPaymentId: input.paymentId
     });
   }
@@ -558,6 +568,10 @@ export class BillingService {
       razorpaySubscriptionId: input.providerPaymentId
     });
 
+    await getDb().update(users)
+      .set({ plan: input.plan as any, updatedAt: new Date() })
+      .where(eq(users.id, input.userId));
+
     return {
       id: subscription.id,
       userId: subscription.userId,
@@ -585,7 +599,7 @@ export class BillingService {
     if (existing.length > 0) {
       const [updated] = await db.update(subscriptions)
         .set({
-          plan: input.plan,
+          plan: input.plan as any,
           status: 'active',
           startDate: input.startDate,
           endDate: input.endDate,
@@ -599,7 +613,7 @@ export class BillingService {
 
     const [created] = await db.insert(subscriptions).values({
       userId: input.userId,
-      plan: input.plan,
+      plan: input.plan as any,
       status: 'active',
       startDate: input.startDate,
       endDate: input.endDate,

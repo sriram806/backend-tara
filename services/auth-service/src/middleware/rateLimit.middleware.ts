@@ -10,7 +10,7 @@ type RateLimitPolicy = {
 export function createRateLimitMiddleware(policy: RateLimitPolicy) {
   return async function rateLimitMiddleware(request: FastifyRequest, reply: FastifyReply) {
     const key = `rate:${request.ip}:${policy.scope}`;
-    const result = rateLimitService.check(key, policy.max, policy.windowMs);
+    const result = await rateLimitService.check(key, policy.max, policy.windowMs);
 
     reply.header('x-ratelimit-limit', String(policy.max));
     reply.header('x-ratelimit-remaining', String(result.remaining));

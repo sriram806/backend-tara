@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import {
   getDb,
   recommendationLogs,
@@ -171,39 +171,39 @@ export class RecommendationService {
     const candidates = await this.buildCandidates(userId, context, reason, recommendationStrategy);
     const nextCandidates = uniqueByKey(sortCandidates(candidates)).slice(0, 8);
 
-    await db.update(userRecommendations)
-      .set({ status: 'dismissed' })
-      .where(and(eq(userRecommendations.userId, userId), eq(userRecommendations.status, 'pending')));
+    await db.transaction(async (tx) => {
+      // Clear existing pending feed items before inserting the refreshed feed.
+      // This avoids status-transition collisions with the unique index
+      // (userId, type, title, status) when old pending items are later dismissed/completed.
+      await tx.delete(userRecommendations)
+        .where(and(eq(userRecommendations.userId, userId), eq(userRecommendations.status, 'pending')));
 
-    for (const candidate of nextCandidates) {
-      const existingPending = await db.select().from(userRecommendations).where(and(
-        eq(userRecommendations.userId, userId),
-        eq(userRecommendations.type, candidate.type),
-        eq(userRecommendations.title, candidate.title),
-        eq(userRecommendations.status, 'pending')
-      )).limit(1);
-
-      if (existingPending.length > 0) {
-        await db.update(userRecommendations)
-          .set({
+      for (const candidate of nextCandidates) {
+        await tx.insert(userRecommendations)
+          .values({
+            userId,
+            type: candidate.type,
+            title: candidate.title,
             description: candidate.description,
             priority: candidate.priority,
+            status: 'pending' as const,
             createdAt: new Date()
           })
-          .where(eq(userRecommendations.id, existingPending[0].id));
-        continue;
+          .onConflictDoUpdate({
+            target: [
+              userRecommendations.userId,
+              userRecommendations.type,
+              userRecommendations.title,
+              userRecommendations.status
+            ],
+            set: {
+              description: candidate.description,
+              priority: candidate.priority,
+              createdAt: new Date()
+            }
+          });
       }
-
-      await db.insert(userRecommendations).values({
-        userId,
-        type: candidate.type,
-        title: candidate.title,
-        description: candidate.description,
-        priority: candidate.priority,
-        status: 'pending',
-        createdAt: new Date()
-      });
-    }
+    });
 
     await CacheService.bumpVersion(recommendationRevisionKey(userId));
 
@@ -249,6 +249,15 @@ export class RecommendationService {
     });
 
     if (action !== 'clicked') {
+      await db.delete(userRecommendations)
+        .where(and(
+          eq(userRecommendations.userId, userId),
+          eq(userRecommendations.type, recommendation.type),
+          eq(userRecommendations.title, recommendation.title),
+          eq(userRecommendations.status, nextStatus),
+          ne(userRecommendations.id, recommendation.id)
+        ));
+
       await db.update(userRecommendations)
         .set({
           status: nextStatus

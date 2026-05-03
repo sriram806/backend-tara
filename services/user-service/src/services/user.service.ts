@@ -22,19 +22,7 @@ export class UserService {
 
   async getMe(userId: string) {
     const cacheKey = `user:me:${userId}`;
-    const cached = await CacheService.getJson<{
-      id: string;
-      email: string;
-      role: string;
-      status: string;
-      emailVerified: boolean;
-      isOnboarded: boolean;
-      displayName: string | null;
-      targetRole: string | null;
-      preferences: Record<string, unknown>;
-      bio: string | null;
-    }>(cacheKey);
-
+    const cached = await CacheService.getJson<any>(cacheKey);
     if (cached) {
       return cached;
     }
@@ -73,6 +61,7 @@ export class UserService {
       status: user.status,
       emailVerified: user.emailVerified,
       isOnboarded: user.isOnboarded,
+      plan: user.plan,
       displayName: profile?.fullName ?? null,
       targetRole: targetRole?.title ?? null,
       preferences: profile?.preferences ?? {},
@@ -82,11 +71,19 @@ export class UserService {
         'bio' in profile.preferences &&
         typeof profile.preferences.bio === 'string'
           ? profile.preferences.bio
-          : null
+          : null,
+      socialLinks:
+        profile?.preferences &&
+        typeof profile.preferences === 'object' &&
+        'socialLinks' in profile.preferences
+          ? profile.preferences.socialLinks
+          : {},
+      createdAt: user.createdAt ?? null,
+      updatedAt: user.updatedAt ?? null
     };
 
-      await CacheService.setJson(cacheKey, profilePayload, USER_ME_CACHE_TTL_SECONDS);
-      return profilePayload;
+    await CacheService.setJson(cacheKey, profilePayload, USER_ME_CACHE_TTL_SECONDS);
+    return profilePayload;
   }
 
   async updateMe(userId: string, input: PatchMeInput) {
@@ -115,6 +112,10 @@ export class UserService {
 
     if (input.bio !== undefined) {
       nextPreferences.bio = input.bio;
+    }
+
+    if (input.socialLinks !== undefined) {
+      nextPreferences.socialLinks = input.socialLinks;
     }
 
     if (profile) {

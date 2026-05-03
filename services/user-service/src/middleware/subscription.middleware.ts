@@ -1,20 +1,20 @@
 import { desc, eq } from 'drizzle-orm';
-import { getDb, subscriptions } from '@thinkai/db';
+import { getDb, subscriptions, users } from '@thinkai/db';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { redisClient } from '../queues/connection';
 
 type Feature = 'career' | 'resume' | 'roadmap' | 'jobs' | 'interview' | 'assessment';
 type GuardedFeature = Feature | 'onboarding';
-type Plan = 'FREE' | 'PRO' | 'ENTERPRISE';
+type Plan = 'LITE' | 'PRO' | 'ENTERPRISE';
 
 const PLAN_LIMITS: Record<Plan, Record<Feature, number | null>> = {
-  FREE: {
-    career: 5,
-    resume: 2,
-    roadmap: 2,
-    jobs: 3,
+  LITE: {
+    career: 10,
+    resume: 5,
+    roadmap: 5,
+    jobs: 10,
     interview: 0,
-    assessment: 6
+    assessment: 10
   },
   PRO: {
     career: null,
@@ -35,13 +35,29 @@ const PLAN_LIMITS: Record<Plan, Record<Feature, number | null>> = {
 };
 
 const RESTRICTED_FEATURES: Record<Plan, Feature[]> = {
-  FREE: ['interview'],
+  LITE: ['interview'],
   PRO: [],
   ENTERPRISE: []
 };
 
 async function resolveActiveSubscription(userId: string) {
   const db = getDb();
+
+  // Check users table for role and direct plan assignment
+  const [user] = await db.select({
+    plan: users.plan,
+    role: users.role
+  }).from(users).where(eq(users.id, userId)).limit(1);
+
+  // 🛡️ Guest Bypass: Universal access for developers/testers
+  if (user?.role === 'guest') {
+    return { plan: 'ENTERPRISE', status: 'active', endDate: new Date('2099-12-31') };
+  }
+
+  if (!user || !user.plan) {
+    return null;
+  }
+
   const now = new Date();
   const rows = await db.select().from(subscriptions)
     .where(eq(subscriptions.userId, userId))
@@ -49,7 +65,8 @@ async function resolveActiveSubscription(userId: string) {
     .limit(1);
 
   if (rows.length === 0) {
-    return null;
+    // Manual Override / Admin assigned plan
+    return { plan: user.plan, status: 'active', endDate: new Date('2099-12-31') };
   }
 
   const active = rows[0];
@@ -61,7 +78,13 @@ async function resolveActiveSubscription(userId: string) {
 }
 
 export async function hasActiveSubscription(userId: string) {
-  return Boolean(await resolveActiveSubscription(userId));
+  const db = getDb();
+  const [user] = await db.select({
+    plan: users.plan,
+    role: users.role
+  }).from(users).where(eq(users.id, userId)).limit(1);
+
+  return user?.role === 'guest' || Boolean(user?.plan);
 }
 
 export function requireActiveSubscription(feature: GuardedFeature = 'onboarding') {
@@ -116,7 +139,7 @@ export function requireSubscription(feature: Feature) {
       });
     }
 
-    const plan = subscription.plan;
+    const plan = subscription.plan as Plan;
     if (RESTRICTED_FEATURES[plan].includes(feature)) {
       return reply.code(403).send({
         success: false,

@@ -97,9 +97,13 @@ services:
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-150}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
-      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://localhost:4001}
-      USER_SERVICE_URL: ${USER_SERVICE_URL:-http://localhost:4002}
-      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://localhost:8000}
+      AUTH_SERVICE_URL: http://auth-service:4001
+      USER_SERVICE_URL: http://user-service:4002
+      AI_SERVICE_URL: http://ai-service:8000
+      EXAM_SERVICE_URL: http://exam-service:4111
+      BILLING_SERVICE_URL: http://billing-service:4010
+      NOTIFICATION_SERVICE_URL: http://notification-service:4012
+      INTERVIEW_SERVICE_URL: http://interview-service:4013
       REDIS_URL: redis://redis:6379
     ports:
       - "4000:4000"
@@ -141,6 +145,8 @@ services:
       BCRYPT_ROUNDS: 12
       OTP_EXPIRY_MINUTES: 5
       OTP_MAX_ATTEMPTS: 5
+      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
+      LOCKOUT_DURATION_MINUTES: ${LOCKOUT_DURATION_MINUTES:-720}
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT}
       SMTP_USER: ${SMTP_USER}
@@ -183,6 +189,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://thinkai:thinkai@postgres:5432/thinkai?sslmode=disable}
       MONGO_URL: mongodb://${MONGO_USER}:${MONGO_PASS}@mongodb:27017/thinkai?authSource=admin
       REDIS_URL: redis://redis:6379
+      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
+      LOCKOUT_DURATION_MINUTES: ${LOCKOUT_DURATION_MINUTES:-720}
       JWT_ACCESS_SECRET: ${AUTH_ACCESS_TOKEN_SECRET}
       AI_SERVICE_INTERNAL_URL: ${AI_SERVICE_INTERNAL_URL:-http://ai-service:8000}
       AI_MONTHLY_QUOTA_MAX: ${AI_MONTHLY_QUOTA_MAX:-30}
@@ -195,6 +203,8 @@ services:
       redis:
         condition: service_healthy
       mongodb:
+        condition: service_healthy
+      exam-service:
         condition: service_healthy
     networks:
       - think_v1_network
@@ -251,6 +261,42 @@ services:
       retries: 5
       start_period: 20s
 
+  exam-service:
+    image: think_v1_exam_service
+    build:
+      context: ..
+      dockerfile: services/exam-service/Dockerfile
+    container_name: think_v1_exam_service
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      SERVICE_NAME: exam-service
+      PORT: ${EXAM_SERVICE_PORT:-4111}
+      HOST: 0.0.0.0
+      LOG_LEVEL: info
+      METRICS_NAMESPACE: ${METRICS_NAMESPACE:-ThinkAI/Services}
+      SENTRY_DSN: ${EXAM_SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://thinkai:thinkai@postgres:5432/thinkai?sslmode=disable}
+      JWT_ACCESS_SECRET: ${AUTH_ACCESS_TOKEN_SECRET}
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
+    ports:
+      - "4111:4111"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - think_v1_network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4111/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   billing-service:
     image: think_v1_billing_service
     build:
@@ -274,8 +320,8 @@ services:
       MONGO_URL: mongodb://${MONGO_USER}:${MONGO_PASS}@mongodb:27017/thinkai?authSource=admin
       REDIS_URL: redis://redis:6379
       JWT_ACCESS_SECRET: ${AUTH_ACCESS_TOKEN_SECRET}
-      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-rzp_test_key}
-      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-rzp_test_secret}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-rzp_test_SfhDGY5BOlgV6S}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-FcrLDj84W7SrvLhEU4W6LPMv}
       RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-rzp_test_webhook}
       CORS_ORIGIN: http://localhost:3000,http://localhost:3001
     ports:

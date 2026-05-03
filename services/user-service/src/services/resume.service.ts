@@ -75,8 +75,8 @@ function scoreStructuredResume(resume: StructuredResumeDto, targetRole?: string 
   const sectionScores = {
     summary: Math.min(100, Math.round((resume.summary.length / 180) * 100)),
     skills: Math.min(100, Math.round((resume.skills.length / 10) * 100)),
-    experience: Math.min(100, Math.round((resume.experience.reduce((sum, item) => sum + item.bullets.length, 0) / 5) * 100)),
-    projects: Math.min(100, Math.round((resume.projects.reduce((sum, item) => sum + item.bullets.length, 0) / 3) * 100)),
+    experience: Math.min(100, Math.round((resume.experience.length / 2) * 100)),
+    projects: Math.min(100, Math.round((resume.projects.length / 2) * 100)),
     education: resume.education.length > 0 ? 100 : 0
   };
 
@@ -85,13 +85,12 @@ function scoreStructuredResume(resume: StructuredResumeDto, targetRole?: string 
   );
 
   const expectedKeywords = resolveRoleKeywords(targetRole);
-  const skillNames = resume.skills.map((skill) => skill.name);
   const searchable = normalize([
     resume.summary,
-    ...skillNames,
-    ...resume.experience.flatMap((item) => [item.role, item.company, ...item.bullets, ...item.technologies]),
-    ...resume.projects.flatMap((item) => [item.name, ...(item.bullets ?? []), ...(item.technologies ?? [])]),
-    ...resume.education.flatMap((item) => [item.degree, item.field ?? '', item.institution])
+    ...resume.skills.map((s) => s.name),
+    ...resume.experience.flatMap((item) => [item.role, item.company, ...item.bullets, ...item.techStack]),
+    ...resume.projects.flatMap((item) => [item.name, ...item.bullets, ...item.techStack]),
+    ...resume.education.flatMap((item) => [item.degree, item.college])
   ].join(' '));
 
   const matchedKeywords = expectedKeywords.filter((keyword) => searchable.includes(normalize(keyword)));
@@ -118,15 +117,15 @@ function scoreStructuredResume(resume: StructuredResumeDto, targetRole?: string 
 function toStructuredText(resume: StructuredResumeDto) {
   return {
     Summary: resume.summary,
-    Skills: resume.skills.map((skill) => skill.name).join(', '),
+    Skills: resume.skills.join(', '),
     Experience: resume.experience
-      .map((item) => `${item.role}, ${item.company}\n${item.bullets.map((bullet) => `- ${bullet}`).join('\n')}`)
+      .map((item) => `${item.role}, ${item.company} (${item.duration})\n${item.bullets.map((bullet) => `- ${bullet}`).join('\n')}`)
       .join('\n\n'),
     Projects: resume.projects
       .map((item) => `${item.name}\n${item.bullets.map((bullet) => `- ${bullet}`).join('\n')}`)
       .join('\n\n'),
     Education: resume.education
-      .map((item) => `${item.degree}${item.field ? `, ${item.field}` : ''}, ${item.institution}`)
+      .map((item) => `${item.degree}, ${item.college} (CGPA: ${item.cgpa}, Year: ${item.year})`)
       .join('\n')
   };
 }
@@ -194,7 +193,7 @@ export class ResumeService {
           resumeId,
           userId,
           name: skill.name,
-          category: skill.category,
+          category: 'technical',
           proficiency: skill.proficiency,
           sortOrder: index
         })));
@@ -206,12 +205,12 @@ export class ResumeService {
           userId,
           company: item.company,
           role: item.role,
-          location: item.location,
-          startDate: item.startDate,
-          endDate: item.endDate,
-          isCurrent: item.isCurrent,
+          location: '',
+          startDate: item.duration,
+          endDate: '',
+          isCurrent: false,
           bullets: item.bullets,
-          technologies: unique(item.technologies),
+          technologies: unique(item.techStack),
           sortOrder: index,
           updatedAt: now
         })));
@@ -222,10 +221,10 @@ export class ResumeService {
           resumeId,
           userId,
           name: item.name,
-          role: item.role,
-          url: item.url,
+          role: 'Contributor',
+          url: item.link,
           bullets: item.bullets,
-          technologies: unique(item.technologies),
+          technologies: unique(item.techStack),
           sortOrder: index,
           updatedAt: now
         })));
@@ -235,13 +234,13 @@ export class ResumeService {
         await tx.insert(resumeEducation).values(resume.education.map((item, index) => ({
           resumeId,
           userId,
-          institution: item.institution,
+          institution: item.college,
           degree: item.degree,
-          field: item.field,
-          startYear: item.startYear,
-          endYear: item.endYear,
-          grade: item.grade,
-          highlights: item.highlights,
+          field: '',
+          startYear: '',
+          endYear: item.year,
+          grade: item.cgpa,
+          highlights: [],
           sortOrder: index,
           updatedAt: now
         })));
@@ -374,43 +373,44 @@ export class ResumeService {
       db.select().from(resumeEducation).where(eq(resumeEducation.resumeId, row.id)).orderBy(resumeEducation.sortOrder)
     ]);
 
-    const resume: StructuredResumeDto = {
-      title: row.title,
+    const draft = row.draftData as any;
+    const resume: any = {
+      profile: draft?.profile || {
+        name: '',
+        email: '',
+        phone: '',
+        address: ''
+      },
+      links: draft?.links || {
+        linkedUrl: '',
+        githubUrl: '',
+        portfolioUrl: '',
+        resumePdfUrl: ''
+      },
       summary: row.summary,
       skills: skills.map((skill) => ({
         name: skill.name,
-        category: ['technical', 'tool', 'domain', 'soft'].includes(skill.category)
-          ? skill.category as StructuredResumeDto['skills'][number]['category']
-          : 'technical',
-        proficiency: ['beginner', 'intermediate', 'advanced', 'expert'].includes(skill.proficiency)
-          ? skill.proficiency as StructuredResumeDto['skills'][number]['proficiency']
-          : 'intermediate'
+        proficiency: skill.proficiency as 'beginner' | 'intermediate' | 'advanced' | 'expert'
       })),
       experience: experiences.map((item) => ({
         company: item.company,
         role: item.role,
-        location: item.location ?? undefined,
-        startDate: item.startDate,
-        endDate: item.endDate ?? undefined,
-        isCurrent: item.isCurrent,
-        bullets: item.bullets,
-        technologies: item.technologies
+        duration: item.startDate,
+        techStack: item.technologies,
+        bullets: item.bullets
       })),
       projects: projects.map((item) => ({
         name: item.name,
-        role: item.role ?? undefined,
-        url: item.url ?? undefined,
-        bullets: item.bullets,
-        technologies: item.technologies
+        techStack: item.technologies,
+        link: item.url ?? '',
+        bullets: item.bullets
       })),
+      achievements: row.draftData?.achievements || [],
       education: education.map((item) => ({
-        institution: item.institution,
         degree: item.degree,
-        field: item.field ?? undefined,
-        startYear: item.startYear ?? undefined,
-        endYear: item.endYear ?? undefined,
-        grade: item.grade ?? undefined,
-        highlights: item.highlights
+        college: item.institution,
+        cgpa: item.grade ?? '',
+        year: item.endYear ?? ''
       }))
     };
 

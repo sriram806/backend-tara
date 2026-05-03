@@ -14,6 +14,7 @@ export const onboardingRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(401).send({ success: false, error: 'Unauthorized' });
       }
 
+      console.log('DEBUG: Save Resume Body:', JSON.stringify(request.body, null, 2));
       const body = resumeSaveRequestSchema.parse(request.body);
       const result = await OnboardingService.saveResume(userId, body.resume, body.mode);
       return replyOk(reply, result, body.mode === 'final' ? 201 : 200);

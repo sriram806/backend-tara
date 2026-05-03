@@ -89,12 +89,48 @@ export const resumeEducationSchema = z.object({
 });
 
 export const structuredResumeSchema = z.object({
-  title: cleanString(2, 80).default('Primary resume'),
-  summary: cleanString(80, 600),
-  skills: z.array(resumeSkillSchema).min(5).max(40),
-  experience: z.array(resumeExperienceSchema).min(1).max(8),
-  projects: z.array(resumeProjectSchema).min(1).max(8),
-  education: z.array(resumeEducationSchema).min(1).max(5)
+  title: cleanString(1, 100).default('Primary Resume'),
+  profile: z.object({
+    name: cleanString(2, 100),
+    email: z.string().email(),
+    phone: cleanString(10, 20),
+    address: cleanString(5, 200),
+  }),
+  links: z.object({
+    linkedUrl: cleanString(5, 200),
+    githubUrl: cleanString(5, 200),
+    portfolioUrl: optionalCleanString(200),
+    resumePdfUrl: optionalCleanString(200),
+  }),
+  skills: z.array(z.object({
+    name: cleanString(1, 60),
+    proficiency: z.enum(['beginner', 'intermediate', 'advanced', 'expert']).default('intermediate')
+  })).min(1).max(5),
+  summary: cleanString(30, 1000),
+  experience: z.array(z.object({
+    company: cleanString(2, 100),
+    role: cleanString(2, 100),
+    duration: cleanString(2, 50),
+    techStack: z.array(cleanString(1, 40)),
+    bullets: z.array(cleanString(10, 300)).length(3),
+  })).default([]),
+  projects: z.array(z.object({
+    name: cleanString(2, 100),
+    techStack: z.array(cleanString(1, 40)),
+    link: cleanString(5, 200),
+    bullets: z.array(cleanString(10, 300)).length(3),
+  })).min(1),
+  achievements: z.array(z.object({
+    title: cleanString(2, 100),
+    description: optionalCleanString(300),
+    link: optionalCleanString(200),
+  })).default([]),
+  education: z.array(z.object({
+    degree: cleanString(2, 120),
+    college: cleanString(2, 120),
+    cgpa: cleanString(1, 20),
+    year: cleanString(4, 10),
+  })).min(1),
 });
 
 export const resumeSaveRequestSchema = z.object({

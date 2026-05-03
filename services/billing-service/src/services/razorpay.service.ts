@@ -17,6 +17,10 @@ export class RazorpayService {
     private readonly webhookSecret: string
   ) {}
 
+  getKeyId() {
+    return this.keyId;
+  }
+
   async createOrder(input: { userId: string; plan: PlanName; receipt: string }) {
     const planConfig = getPlanConfig(input.plan);
     if (planConfig.amountInPaise <= 0) {

@@ -14,7 +14,6 @@ import { roadmapRoutes } from './routes/roadmap.routes';
 import { jobMatchRoutes } from './routes/job-match.routes';
 import { resumeAnalysisRoutes } from './routes/resume-analysis.routes';
 import { onboardingRoutes } from './routes/onboarding.routes';
-import { examRoutes } from './routes/exam.routes';
 import { orgRoutes } from './routes/org.routes';
 import { personalizationRoutes } from './routes/personalization.routes';
 import { recommendationRoutes } from './routes/recommendation.routes';
@@ -22,11 +21,22 @@ import { skillsRoutes } from './routes/skills.routes';
 import { analyticsRoutes } from './routes/analytics.routes';
 import { experimentRoutes } from './routes/experiment.routes';
 import { featureFlagRoutes } from './routes/feature-flag.routes';
+import { adminRoutes } from './routes/admin.routes';
+import { moderationRoutes } from './routes/moderation.routes';
+import { notificationAdminRoutes } from './routes/notification.routes';
+import { customRolesRoutes } from './routes/custom-roles.routes';
+import { webhookRoutes } from './routes/webhook.routes';
+import { apiKeyRoutes } from './routes/api-key.routes';
 import { UserService } from './services/user.service';
+import { SchemaCompatibilityService } from './services/schema-compatibility.service';
 import mongoose from 'mongoose';
 import { UserHealthController } from './controllers/health.controller';
 import { startAnalyticsWorker } from './queues/analytics.queue';
 import { startAnalyticsAggregationScheduler } from './services/analytics-aggregation.service';
+import { startEmailWorker } from './queues/email.queue';
+import { startBulkImportWorker } from './queues/bulk-import.queue';
+import { startWebhookWorker } from './queues/webhook.queue';
+import { startCronWorker, initCronJobs } from './queues/cron.queue';
 
 const env = loadEnv(commonServiceEnvSchema.merge(z.object({
   CORS_ORIGIN: z.string().default('http://localhost:3000,http://localhost:3001'),
@@ -106,11 +116,22 @@ app.addHook('onResponse', async (request, reply) => {
 
 app.addHook('onError', async (_request, _reply, error) => {
   if (sentryDsn) {
-    Sentry.captureException(error);
+    Sentry.withScope((scope) => {
+      if (_request.userContext) {
+        scope.setUser({ id: _request.userContext.userId, role: _request.userContext.role });
+      }
+      if (_request.apiKeyScopes) {
+        scope.setTag('api_client', 'true');
+        scope.setExtra('scopes', _request.apiKeyScopes);
+      }
+      scope.setExtra('route', _request.routeOptions?.url ?? _request.url);
+      scope.setExtra('method', _request.method);
+      Sentry.captureException(error);
+    });
   }
 });
 
-void registerCorePlugins(app);
+app.register(registerCorePlugins);
 
 app.register(healthRoutes(userHealthController), { prefix: '/' });
 app.register(userRoutes(userController), { prefix: '/users' });
@@ -120,7 +141,6 @@ app.register(resumeAnalysisRoutes, { prefix: '/ai/resume' });
 app.register(analysisRoutes, { prefix: '/ai/analysis' });
 app.register(roadmapRoutes, { prefix: '/ai/roadmap' });
 app.register(jobMatchRoutes, { prefix: '/ai/jobs' });
-app.register(examRoutes, { prefix: '/exam' });
 app.register(orgRoutes, { prefix: '/org' });
 app.register(personalizationRoutes, { prefix: '/user' });
 app.register(recommendationRoutes, { prefix: '/user' });
@@ -128,15 +148,27 @@ app.register(skillsRoutes, { prefix: '/skills' });
 app.register(analyticsRoutes, { prefix: '/analytics' });
 app.register(experimentRoutes, { prefix: '/experiments' });
 app.register(featureFlagRoutes, { prefix: '/feature-flags' });
+app.register(adminRoutes, { prefix: '/admin' });
+app.register(moderationRoutes, { prefix: '/admin/moderation' });
+app.register(notificationAdminRoutes, { prefix: '/admin/notifications' });
+app.register(customRolesRoutes, { prefix: '/admin/roles' });
+app.register(webhookRoutes, { prefix: '/admin/webhooks' });
+app.register(apiKeyRoutes, { prefix: '/admin/api-keys' });
 // ✅ JSON Health API
 
 const start = async () => {
   try {
+    await SchemaCompatibilityService.ensure();
     if (process.env.MONGO_URL) {
       await mongoose.connect(process.env.MONGO_URL);
       app.log.info('Connected to MongoDB');
       startAnalyticsWorker(app.log);
       startAnalyticsAggregationScheduler(app.log);
+      startEmailWorker(app.log);
+      startBulkImportWorker(app.log);
+      startWebhookWorker(app.log);
+      startCronWorker(app.log);
+      await initCronJobs();
     }
     await app.listen({ host: env.HOST, port: env.PORT });
   } catch (error) {

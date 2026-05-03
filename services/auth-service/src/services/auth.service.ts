@@ -54,12 +54,13 @@ export class AuthService {
       preferences: input.preferences
     });
 
-    await this.sendOtpInternal(user.email, user.id, 'VERIFY_EMAIL');
+    const otp = await this.sendOtpInternal(user.email, user.id, 'VERIFY_EMAIL');
 
     return {
       userId: user.id,
       email: user.email,
-      emailVerified: user.emailVerified
+      emailVerified: user.emailVerified,
+      ...(this.config.exposeOtpInResponse ? { otp } : {})
     };
   }
 
@@ -71,8 +72,28 @@ export class AuthService {
       throw new AppError('INVALID_CREDENTIALS', 'Invalid credentials', 401);
     }
 
+    // ─── Account lockout check ──────────────────────────────────────────────
+    const lockUntilRaw = (user as any).lockUntil as Date | null | undefined;
+    if (lockUntilRaw && new Date(lockUntilRaw) > new Date()) {
+      const unlockAt = new Date(lockUntilRaw).toISOString();
+      throw new AppError(
+        'ACCOUNT_LOCKED',
+        `Account is temporarily locked due to too many failed attempts. Try again after ${unlockAt}.`,
+        423
+      );
+    }
+
     const matched = await verifyPassword(input.password, user.passwordHash);
     if (!matched) {
+      // Record failure — best effort, non-blocking
+      void this.store.incrementFailedAttempts(user.id);
+      void this.store.recordLoginHistory({
+        userId: user.id,
+        ipAddress: context.ipAddress,
+        userAgent: context.deviceInfo,
+        success: false,
+        failureReason: 'INVALID_CREDENTIALS'
+      });
       throw new AppError('INVALID_CREDENTIALS', 'Invalid credentials', 401);
     }
 
@@ -81,8 +102,24 @@ export class AuthService {
     }
 
     if (user.status !== 'active') {
+      void this.store.recordLoginHistory({
+        userId: user.id,
+        ipAddress: context.ipAddress,
+        userAgent: context.deviceInfo,
+        success: false,
+        failureReason: 'ACCOUNT_NOT_ACTIVE'
+      });
       throw new AppError('ACCOUNT_NOT_ACTIVE', 'Account is not active', 403);
     }
+
+    // ─── Successful login ───────────────────────────────────────────────────
+    void this.store.resetFailedAttempts(user.id);
+    void this.store.recordLoginHistory({
+      userId: user.id,
+      ipAddress: context.ipAddress,
+      userAgent: context.deviceInfo,
+      success: true
+    });
 
     return this.issueTokenPair(user.id, user.role, context);
   }
@@ -129,8 +166,11 @@ export class AuthService {
       throw new AppError('ALREADY_VERIFIED', 'Email already verified', 400);
     }
 
-    await this.sendOtpInternal(user.email, user.id, 'VERIFY_EMAIL');
-    return { sent: true };
+    const otp = await this.sendOtpInternal(user.email, user.id, 'VERIFY_EMAIL');
+    return { 
+      sent: true,
+      ...(this.config.exposeOtpInResponse ? { otp } : {})
+    };
   }
 
   async verifyEmail(input: VerifyEmailInput) {
@@ -164,15 +204,10 @@ export class AuthService {
     }
 
     const otp = await this.sendOtpInternal(user.email, user.id, 'RESET_PASSWORD');
-
-    return this.config.exposeOtpInResponse
-      ? {
-          sent: true,
-          otp
-        }
-      : {
-          sent: true
-        };
+    return { 
+      sent: true,
+      ...(this.config.exposeOtpInResponse ? { otp } : {})
+    };
   }
 
   async resetPassword(input: ResetPasswordInput) {

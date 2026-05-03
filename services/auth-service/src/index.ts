@@ -36,7 +36,10 @@ const env = loadEnv(commonServiceEnvSchema.merge(z.object({
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
   METRICS_NAMESPACE: z.string().default('ThinkAI/Services'),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
-  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000)
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
+  REDIS_URL: z.string().url().optional(),
+  MAX_LOGIN_ATTEMPTS: z.coerce.number().int().min(1).default(5),
+  LOCKOUT_DURATION_MINUTES: z.coerce.number().int().min(1).default(15)
 })));
 
 const createCloudWatchMetricEvent = (

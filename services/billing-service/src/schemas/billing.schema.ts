@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { PlanName } from '../utils/plans';
 
 export const subscribeSchema = z.object({
-  plan: z.enum(['FREE', 'PRO', 'ENTERPRISE']),
+  plan: z.enum(['LITE', 'PRO', 'ENTERPRISE']),
   idempotencyKey: z
     .string()
     .trim()

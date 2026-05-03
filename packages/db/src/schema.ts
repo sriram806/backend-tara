@@ -12,15 +12,16 @@ import {
 } from 'drizzle-orm/pg-core';
 
 export const authProviderEnum = pgEnum('auth_provider', ['local', 'google', 'github']);
-export const userRoleEnum = pgEnum('user_role', ['guest', 'free', 'pro', 'admin']);
+export const userRoleEnum = pgEnum('user_role', ['guest', 'user', 'support', 'moderator', 'admin']);
 export const userStatusEnum = pgEnum('user_status', ['active', 'suspended', 'deleted']);
 export const otpTypeEnum = pgEnum('otp_type', ['VERIFY_EMAIL', 'RESET_PASSWORD']);
-export const billingPlanEnum = pgEnum('billing_plan', ['FREE', 'PRO', 'ENTERPRISE']);
+export const billingPlanEnum = pgEnum('billing_plan', ['LITE', 'PRO', 'ENTERPRISE']);
 export const subscriptionStatusEnum = pgEnum('subscription_status', ['active', 'cancelled', 'expired']);
 export const invoiceStatusEnum = pgEnum('invoice_status', ['paid', 'failed', 'pending']);
 export const paymentStatusEnum = pgEnum('payment_status', ['created', 'authorized', 'paid', 'failed']);
 export const webhookStatusEnum = pgEnum('webhook_status', ['processing', 'processed', 'failed']);
 export const notificationTypeEnum = pgEnum('notification_type', ['email', 'in_app']);
+export const notificationCategoryEnum = pgEnum('notification_category', ['info', 'success', 'warning', 'error', 'system', 'promotion']);
 export const aiRunStatusEnum = pgEnum('ai_run_status', ['pending', 'processing', 'completed', 'failed']);
 export const resumeStatusEnum = pgEnum('resume_status', ['draft', 'active', 'archived']);
 export const onboardingStepEnum = pgEnum('onboarding_step', ['resume', 'target_role', 'complete']);
@@ -39,6 +40,25 @@ export const experimentTypeEnum = pgEnum('experiment_type', ['roadmap', 'exam', 
 export const examQuestionTypeEnum = pgEnum('exam_question_type', ['MCQ', 'FILL', 'CODE']);
 export const examStatusEnum = pgEnum('exam_status', ['IN_PROGRESS', 'PASS', 'FAIL']);
 export const skillProgressStatusEnum = pgEnum('skill_progress_status', ['NOT_STARTED', 'LEARNING', 'PASSED']);
+export const examSkillTypeEnum = pgEnum('exam_skill_type', ['STANDARD', 'PROGRAMMING_LANGUAGE']);
+export const adminActionEnum = pgEnum('admin_action', [
+  'create_user', 'update_user', 'suspend_user', 'unlock_user', 'delete_user',
+  'impersonate_user', 'export_data', 'delete_data', 'revoke_session', 'revoke_all_sessions',
+  'update_role', 'update_subscription', 'create_gdpr_request', 'manage_api_key',
+  'manage_custom_field', 'manage_mfa', 'update_feature_flag', 'manage_webhook',
+  'bulk_import', 'bulk_export', 'view_audit_log',
+  'send_notification', 'flag_user', 'resolve_report', 'create_role', 'update_role_perms'
+]);
+export const gdprRequestTypeEnum = pgEnum('gdpr_request_type', ['export', 'delete']);
+export const gdprRequestStatusEnum = pgEnum('gdpr_request_status', ['pending', 'processing', 'completed', 'failed']);
+export const mfaMethodEnum = pgEnum('mfa_method', ['totp', 'email', 'sms']);
+export const adminApiKeyScopeEnum = pgEnum('admin_api_key_scope', [
+  'users:read', 'users:write', 'audit:read', 'gdpr:write', 'sessions:write'
+]);
+export const moderationReportStatusEnum = pgEnum('moderation_report_status', ['pending', 'reviewed', 'dismissed']);
+export const moderationReportCategoryEnum = pgEnum('moderation_report_category', [
+  'spam', 'abuse', 'harassment', 'fraud', 'inappropriate_content', 'other'
+]);
 
 export type ResumeSectionScores = {
   summary: number;
@@ -58,17 +78,28 @@ export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
+  plan: billingPlanEnum('plan'),
   authProvider: authProviderEnum('auth_provider').notNull().default('local'),
-  role: userRoleEnum('role').notNull().default('guest'),
+  role: userRoleEnum('role').notNull().default('user'),
   status: userStatusEnum('status').notNull().default('active'),
   emailVerified: boolean('email_verified').notNull().default(false),
   isOnboarded: boolean('is_onboarded').notNull().default(false),
   onboardedAt: timestamp('onboarded_at', { withTimezone: true }),
+  // ─── Security & Moderation ────────────────────────────────────────────────
+  failedLoginAttempts: integer('failed_login_attempts').notNull().default(0),
+  lockUntil: timestamp('lock_until', { withTimezone: true }),
+  lastLogin: timestamp('last_login', { withTimezone: true }),
+  mutedUntil: timestamp('muted_until', { withTimezone: true }),
+  bannedBy: uuid('banned_by'),
+  bannedReason: text('banned_reason'),
+  bannedAt: timestamp('banned_at', { withTimezone: true }),
+  // ─────────────────────────────────────────────────────────────────────────
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
   emailIndex: index('users_email_idx').on(table.email),
-  onboardedIndex: index('users_onboarded_idx').on(table.isOnboarded)
+  onboardedIndex: index('users_onboarded_idx').on(table.isOnboarded),
+  lockUntilIndex: index('users_lock_until_idx').on(table.lockUntil)
 }));
 
 export const userProfiles = pgTable('user_profiles', {
@@ -311,25 +342,42 @@ export const skillExams = pgTable('skill_exams', {
   id: uuid('id').defaultRandom().primaryKey(),
   organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'set null' }),
   skillName: text('skill_name').notNull(),
+  title: text('title').notNull().default(''),
+  description: text('description').notNull().default(''),
+  skillType: examSkillTypeEnum('skill_type').notNull().default('STANDARD'),
   difficultyLevel: integer('difficulty_level').notNull().default(1),
+  passPercentage: integer('pass_percentage').notNull().default(65),
+  mcqCount: integer('mcq_count').notNull().default(15),
+  fillBlankCount: integer('fill_blank_count').notNull().default(10),
+  codingCount: integer('coding_count').notNull().default(0),
+  isPublished: boolean('is_published').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
   organizationIndex: index('skill_exams_org_idx').on(table.organizationId),
   skillDifficultyIndex: index('skill_exams_skill_difficulty_idx').on(table.skillName, table.difficultyLevel),
+  skillTypeIndex: index('skill_exams_skill_type_idx').on(table.skillName, table.skillType),
   createdAtIndex: index('skill_exams_created_at_idx').on(table.createdAt)
 }));
 
 export const examQuestions = pgTable('exam_questions', {
   id: uuid('id').defaultRandom().primaryKey(),
   examId: uuid('exam_id').notNull().references(() => skillExams.id, { onDelete: 'cascade' }),
+  skillName: text('skill_name').notNull().default(''),
   type: examQuestionTypeEnum('type').notNull(),
   question: text('question').notNull(),
   options: jsonb('options').$type<string[] | null>().default(null),
   answer: text('answer').notNull(),
+  placeholder: text('placeholder'),
+  starterCode: text('starter_code'),
+  language: text('language'),
+  explanation: text('explanation'),
   difficulty: integer('difficulty').notNull().default(1),
+  marks: integer('marks').notNull().default(1),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
   examQuestionExamIndex: index('exam_questions_exam_id_idx').on(table.examId),
+  examQuestionSkillIndex: index('exam_questions_skill_name_idx').on(table.skillName),
   examQuestionTypeIndex: index('exam_questions_type_idx').on(table.type),
   examQuestionDifficultyIndex: index('exam_questions_difficulty_idx').on(table.difficulty)
 }));
@@ -346,7 +394,11 @@ export const userExams = pgTable('user_exams', {
   status: examStatusEnum('status').notNull().default('IN_PROGRESS'),
   attemptNumber: integer('attempt_number').notNull().default(1),
   timeLimitSeconds: integer('time_limit_seconds').notNull().default(2700),
+  passPercentage: integer('pass_percentage').notNull().default(65),
+  answersJson: jsonb('answers_json').$type<Record<string, string>>().notNull().default({}),
+  questionSnapshotJson: jsonb('question_snapshot_json').$type<Array<Record<string, unknown>>>().notNull().default([]),
   evaluationJson: jsonb('evaluation_json').$type<Record<string, unknown>>().notNull().default({}),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   submittedAt: timestamp('submitted_at', { withTimezone: true })
 }, (table) => ({
@@ -399,7 +451,7 @@ export const otpVerifications = pgTable('otp_verifications', {
 export const subscriptions = pgTable('subscriptions', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  plan: billingPlanEnum('plan').notNull().default('FREE'),
+  plan: billingPlanEnum('plan').notNull().default('LITE'),
   status: subscriptionStatusEnum('status').notNull().default('active'),
   startDate: timestamp('start_date', { withTimezone: true }).notNull().defaultNow(),
   endDate: timestamp('end_date', { withTimezone: true }).notNull(),
@@ -493,13 +545,18 @@ export const usageTracking = pgTable('usage_tracking', {
 export const notifications = pgTable('notifications', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  sentBy: uuid('sent_by').references(() => users.id, { onDelete: 'set null' }),
   type: notificationTypeEnum('type').notNull().default('in_app'),
+  category: notificationCategoryEnum('category').notNull().default('info'),
   title: text('title').notNull(),
   message: text('message').notNull(),
+  actionUrl: text('action_url'),
   read: boolean('read').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => ({
-  notificationUserIndex: index('notifications_user_id_idx').on(table.userId)
+  notificationUserIndex: index('notifications_user_id_idx').on(table.userId),
+  notificationSentByIndex: index('notifications_sent_by_idx').on(table.sentBy),
+  notificationCategoryIndex: index('notifications_category_idx').on(table.category)
 }));
 
 export const achievements = pgTable('achievements', {
@@ -665,6 +722,150 @@ export const userExperimentAssignments = pgTable('user_experiment_assignments', 
   userExperimentVariantIndex: index('user_experiment_assignments_variant_id_idx').on(table.variantId)
 }));
 
+// ─── Phase 1: Admin Infrastructure Tables ────────────────────────────────────
+
+export const adminAuditLogs = pgTable('admin_audit_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+  actorEmail: text('actor_email'),
+  actorRole: text('actor_role'),
+  action: adminActionEnum('action').notNull(),
+  targetUserId: uuid('target_user_id').references(() => users.id, { onDelete: 'set null' }),
+  targetEmail: text('target_email'),
+  resourceType: text('resource_type'),
+  resourceId: text('resource_id'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  auditActorIdx: index('admin_audit_logs_actor_idx').on(table.actorId),
+  auditTargetIdx: index('admin_audit_logs_target_idx').on(table.targetUserId),
+  auditActionIdx: index('admin_audit_logs_action_idx').on(table.action),
+  auditCreatedAtIdx: index('admin_audit_logs_created_at_idx').on(table.createdAt)
+}));
+
+export const userLoginHistory = pgTable('user_login_history', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  location: text('location'),
+  success: boolean('success').notNull().default(true),
+  failureReason: text('failure_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  loginHistoryUserIdx: index('user_login_history_user_idx').on(table.userId),
+  loginHistoryCreatedAtIdx: index('user_login_history_created_at_idx').on(table.createdAt),
+  loginHistorySuccessIdx: index('user_login_history_success_idx').on(table.userId, table.success)
+}));
+
+export const gdprRequests = pgTable('gdpr_requests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  requestedBy: uuid('requested_by').references(() => users.id, { onDelete: 'set null' }),
+  type: gdprRequestTypeEnum('type').notNull(),
+  status: gdprRequestStatusEnum('status').notNull().default('pending'),
+  downloadUrl: text('download_url'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  gdprUserIdx: index('gdpr_requests_user_idx').on(table.userId),
+  gdprStatusIdx: index('gdpr_requests_status_idx').on(table.status),
+  gdprCreatedAtIdx: index('gdpr_requests_created_at_idx').on(table.createdAt)
+}));
+
+export const userMfaSettings = pgTable('user_mfa_settings', {
+  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  method: mfaMethodEnum('method').notNull().default('totp'),
+  isEnabled: boolean('is_enabled').notNull().default(false),
+  secret: text('secret'),
+  backupCodes: jsonb('backup_codes').$type<string[]>().notNull().default([]),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+});
+
+export const adminApiKeys = pgTable('admin_api_keys', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  keyHash: text('key_hash').notNull(),
+  keyPrefix: text('key_prefix').notNull(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  apiKeyHashIdx: index('admin_api_keys_key_hash_idx').on(table.keyHash),
+  apiKeyCreatedByIdx: index('admin_api_keys_created_by_idx').on(table.createdBy)
+}));
+
+export const userCustomFields = pgTable('user_custom_fields', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  key: text('key').notNull(),
+  value: text('value').notNull(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  customFieldUserIdx: index('user_custom_fields_user_idx').on(table.userId),
+  customFieldKeyIdx: index('user_custom_fields_key_idx').on(table.userId, table.key)
+}));
+
+// ─── Phase 2 Admin: Moderation + Notifications + Custom Roles ──────────────────────
+
+export const moderationReports = pgTable('moderation_reports', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  reportedUserId: uuid('reported_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  reportedBy: uuid('reported_by').references(() => users.id, { onDelete: 'set null' }),
+  reason: text('reason').notNull(),
+  category: moderationReportCategoryEnum('category').notNull().default('other'),
+  status: moderationReportStatusEnum('status').notNull().default('pending'),
+  resolvedBy: uuid('resolved_by').references(() => users.id, { onDelete: 'set null' }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolutionNote: text('resolution_note'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  reportedUserIdx: index('moderation_reports_reported_user_idx').on(table.reportedUserId),
+  reportStatusIdx: index('moderation_reports_status_idx').on(table.status),
+  reportCreatedAtIdx: index('moderation_reports_created_at_idx').on(table.createdAt)
+}));
+
+export const customRoles = pgTable('custom_roles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  permissions: jsonb('permissions').$type<string[]>().notNull().default([]),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  customRoleNameUniqueIdx: uniqueIndex('custom_roles_name_unique_idx').on(table.name)
+}));
+
+// ─── Phase 3 Admin: Webhooks & Automation ──────────────────────────────────
+
+export const webhookEndpoints = pgTable('webhook_endpoints', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  url: text('url').notNull(),
+  secret: text('secret').notNull(),
+  eventTypes: jsonb('event_types').$type<string[]>().notNull().default([]),
+  isActive: boolean('is_active').notNull().default(true),
+  retryCount: integer('retry_count').notNull().default(3),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => ({
+  webhookEndpointUrlIdx: index('webhook_endpoints_url_idx').on(table.url),
+  webhookEndpointActiveIdx: index('webhook_endpoints_active_idx').on(table.isActive)
+}));
+
 export const schema = {
   users,
   userProfiles,
@@ -704,5 +905,17 @@ export const schema = {
   recommendationLogs,
   experiments,
   experimentVariants,
-  userExperimentAssignments
+  userExperimentAssignments,
+  // Phase 1 Admin
+  adminAuditLogs,
+  userLoginHistory,
+  gdprRequests,
+  userMfaSettings,
+  adminApiKeys,
+  userCustomFields,
+  // Phase 2 Admin
+  moderationReports,
+  customRoles,
+  // Phase 3 Admin
+  webhookEndpoints
 };
